@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Iterable
 
 from pdf_rag_chatbot.config import validar_top_k
@@ -16,18 +17,23 @@ LIMITE_TOTAL_COMPARATIVA = 10
 def fontes_mencionadas(pergunta: str, fontes: Iterable[str]) -> list[str]:
     """Fontes cujo nome, com ou sem extensão, aparece na pergunta.
 
-    A comparação ignora diferença entre maiúsculas e minúsculas. A ordem e a
-    ausência de repetição seguem a de ``fontes``.
+    O nome deve aparecer como termo isolado: não pode ser precedido nem seguido
+    por letra, dígito ou sublinhado. A comparação ignora diferença entre
+    maiúsculas e minúsculas. A ordem e a ausência de repetição seguem a de
+    ``fontes``.
     """
-    texto = pergunta.casefold()
     mencionadas: list[str] = []
     for fonte in fontes:
         if fonte in mencionadas:
             continue
-        nome_completo = fonte.casefold()
-        nome_sem_extensao = os.path.splitext(fonte)[0].casefold()
-        if nome_completo in texto or (nome_sem_extensao and nome_sem_extensao in texto):
-            mencionadas.append(fonte)
+        nomes = [fonte, os.path.splitext(fonte)[0]]
+        for nome in nomes:
+            if not nome:
+                continue
+            padrao = r"(?<![\w])" + re.escape(nome) + r"(?![\w])"
+            if re.search(padrao, pergunta, re.IGNORECASE):
+                mencionadas.append(fonte)
+                break
     return mencionadas
 
 

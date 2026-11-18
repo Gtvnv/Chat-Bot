@@ -14,7 +14,7 @@ from pdf_rag_chatbot.embeddings import GeradorDeEmbeddings
 from pdf_rag_chatbot.erros import ErroConfiguracao
 from pdf_rag_chatbot.indice_vetorial import IndiceVetorial
 from pdf_rag_chatbot.modelos import Trecho
-from pdf_rag_chatbot.recuperador import Recuperador
+from pdf_rag_chatbot.recuperador import Recuperador, fontes_mencionadas
 
 from dobles import EmbeddingsFalso
 
@@ -119,3 +119,163 @@ def test_pergunta_comparativa_recupera_trechos_de_cada_arquivo_mencionado(
     fontes_recuperadas = {r.trecho.fonte for r in resultados}
     assert set(mencionados) <= fontes_recuperadas
     assert len(resultados) <= 10
+
+
+# ---------------------------------------------------------------------------
+# Property 30: menção de arquivo exige termo isolado
+# ---------------------------------------------------------------------------
+
+_CARACTERES_DE_PALAVRA = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
+_SEPARADORES = " \t\n.,;:!?()[]{}\"'-/\\@#%&*+="
+
+_RADICAIS = st.text(
+    alphabet="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_",
+    min_size=1,
+    max_size=8,
+)
+_EXTENSOES = st.sampled_from([".pdf", ".PDF", ".Pdf"])
+_FONTES = st.builds(lambda r, e: r + e, _RADICAIS, _EXTENSOES)
+_TEXTO_LIVRE = st.text(
+    alphabet=_CARACTERES_DE_PALAVRA + _SEPARADORES, min_size=0, max_size=12
+)
+_LADO_ISOLADO = st.one_of(
+    st.just(""), st.text(alphabet=_SEPARADORES, min_size=1, max_size=3)
+)
+_LADO_COLADO = st.text(alphabet=_CARACTERES_DE_PALAVRA, min_size=1, max_size=3)
+_FORMA = st.sampled_from(["completo", "radical"])
+_CAIXA = st.sampled_from(["original", "minuscula", "maiuscula", "alternada"])
+
+
+def _radical(fonte: str) -> str:
+    return fonte[: fonte.rindex(".")]
+
+
+def _escolher_forma(fonte: str, forma: str) -> str:
+    return fonte if forma == "completo" else _radical(fonte)
+
+
+def _aplicar_caixa(texto: str, caixa: str) -> str:
+    if caixa == "minuscula":
+        return texto.lower()
+    if caixa == "maiuscula":
+        return texto.upper()
+    if caixa == "alternada":
+        return "".join(c.upper() if i % 2 else c.lower() for i, c in enumerate(texto))
+    return texto
+
+
+def _e_caractere_de_palavra(caractere: str) -> bool:
+    return caractere == "_" or ("a" <= caractere.lower() <= "z") or caractere.isdigit()
+
+
+def _oraculo_menciona(pergunta: str, nome: str) -> bool:
+    """Varredura posição a posição, sem expressão regular."""
+    texto = pergunta.lower()
+    alvo = nome.lower()
+    inicio = texto.find(alvo)
+    while inicio != -1:
+        fim = inicio + len(alvo)
+        antes_ok = inicio == 0 or not _e_caractere_de_palavra(texto[inicio - 1])
+        depois_ok = fim == len(texto) or not _e_caractere_de_palavra(texto[fim])
+        if antes_ok and depois_ok:
+            return True
+        inicio = texto.find(alvo, inicio + 1)
+    return False
+
+
+def _oraculo_fontes(pergunta: str, fontes: list[str]) -> list[str]:
+    resultado: list[str] = []
+    for fonte in fontes:
+        if fonte in resultado:
+            continue
+        if _oraculo_menciona(pergunta, fonte) or _oraculo_menciona(
+            pergunta, _radical(fonte)
+        ):
+            resultado.append(fonte)
+    return resultado
+
+
+@settings(max_examples=200, deadline=None)
+@given(
+    fontes=st.lists(_FONTES, min_size=1, max_size=4),
+    antes=_TEXTO_LIVRE,
+    depois=_TEXTO_LIVRE,
+    meio=st.lists(
+        st.tuples(st.integers(min_value=0, max_value=3), _FORMA, _CAIXA, _TEXTO_LIVRE),
+        max_size=3,
+    ),
+)
+def test_mencao_de_arquivo_concorda_com_oraculo_independente(
+    fontes: list[str], antes: str, depois: str, meio: list[tuple[int, str, str, str]]
+) -> None:
+    # Feature: pdf-rag-chatbot, Property 30: Menção de arquivo exige termo isolado
+    # **Validates: Requirements 3.5**
+    pergunta = antes
+    for indice, forma, caixa, sobra in meio:
+        fonte = fontes[indice % len(fontes)]
+        pergunta += _aplicar_caixa(_escolher_forma(fonte, forma), caixa) + sobra
+    pergunta += depois
+    assert fontes_mencionadas(pergunta, fontes) == _oraculo_fontes(pergunta, fontes)
+
+
+@settings(max_examples=200, deadline=None)
+@given(
+    fonte=_FONTES,
+    forma=_FORMA,
+    caixa=_CAIXA,
+    antes=_LADO_ISOLADO,
+    depois=_LADO_ISOLADO,
+)
+def test_nome_isolado_por_pontuacao_espaco_inicio_ou_fim_e_detectado(
+    fonte: str, forma: str, caixa: str, antes: str, depois: str
+) -> None:
+    # Feature: pdf-rag-chatbot, Property 30: Nome cercado por pontuação, espaços, início ou fim é detectado
+    # **Validates: Requirements 3.5**
+    nome = _aplicar_caixa(_escolher_forma(fonte, forma), caixa)
+    assert fontes_mencionadas(antes + nome + depois, [fonte]) == [fonte]
+
+
+@settings(max_examples=200, deadline=None)
+@given(
+    fonte=_FONTES,
+    caixa=_CAIXA,
+    antes=st.one_of(st.just(""), _LADO_ISOLADO, _LADO_COLADO),
+    depois=st.one_of(st.just(""), _LADO_ISOLADO, _LADO_COLADO),
+)
+def test_radical_colado_em_letra_digito_ou_sublinhado_nao_e_detectado(
+    fonte: str, caixa: str, antes: str, depois: str
+) -> None:
+    # Feature: pdf-rag-chatbot, Property 30: Nome colado em letra, dígito ou sublinhado não é detectado
+    # **Validates: Requirements 3.5**
+    colado_antes = antes != "" and _e_caractere_de_palavra(antes[-1])
+    colado_depois = depois != "" and _e_caractere_de_palavra(depois[0])
+    nome = _aplicar_caixa(_radical(fonte), caixa)
+    encontrado = fontes_mencionadas(antes + nome + depois, [fonte])
+    if colado_antes or colado_depois:
+        # o radical só tem caracteres de palavra, logo nenhuma ocorrência fica isolada
+        assert encontrado == []
+    else:
+        assert encontrado == [fonte]
+
+
+@pytest.mark.parametrize(
+    ("pergunta", "fontes", "esperado"),
+    [
+        ("compare", ["c.pdf"], []),
+        ("compare c.pdf e d.pdf", ["c.pdf", "d.pdf"], ["c.pdf", "d.pdf"]),
+        ("o relatorio_a.pdf traz dados", ["a.pdf"], []),
+        ("o relatorio_a.pdf traz dados", ["relatorio_a.pdf", "a.pdf"], ["relatorio_a.pdf"]),
+        ("veja o A.PDF.", ["a.pdf"], ["a.pdf"]),
+        ("veja (Relatorio)", ["relatorio.pdf"], ["relatorio.pdf"]),
+        ("relatorio2 e relatorio_ e xrelatorio", ["relatorio.pdf"], []),
+        ("relatorio", ["relatorio.pdf"], ["relatorio.pdf"]),
+        ("relatorio.pdf2", ["relatorio.pdf"], ["relatorio.pdf"]),  # radical ainda isolado
+        ("", ["a.pdf"], []),
+    ],
+)
+def test_mencao_de_arquivo_exemplos_fixos(
+    pergunta: str, fontes: list[str], esperado: list[str]
+) -> None:
+    # Feature: pdf-rag-chatbot, Property 30: Menção de arquivo exige termo isolado (exemplos fixos)
+    # **Validates: Requirements 3.5**
+    assert fontes_mencionadas(pergunta, fontes) == esperado

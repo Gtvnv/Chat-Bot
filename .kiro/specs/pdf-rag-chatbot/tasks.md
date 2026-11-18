@@ -321,7 +321,69 @@ Todo o código, os comentários, os nomes de domínio e as mensagens ao usuário
 - [x] 16. Checkpoint final - Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
+- [x] 17. Tornar configuráveis o tempo limite e a temperatura de geração (Revisão 2)
+  - [x] 17.1 Adicionar `tipos.py` e as novas configurações em `config.py`
+    - Criar `src/pdf_rag_chatbot/tipos.py` com o alias `TempoLimite = float | httpx.Timeout`
+    - `validar_timeout_geracao` (inteiro de 10 a 600) e `validar_temperatura` (número de 0 a 1), lançando `ErroConfiguracao` com o nome da variável e a faixa
+    - Ler `TIMEOUT_GERACAO_S` (padrão 60) e `TEMPERATURA_GERACAO` (padrão 0,2) em `carregar_configuracao`; campos `timeout_geracao_s: int` e `temperatura_geracao: float` em `Configuracao`
+    - Acrescentar as duas variáveis, com os valores padrão, em `.env.example`
+    - _Requirements: 3.10, 3.11, 3.13, 3.14_
+  - [x] 17.2 Repassar tempo limite e temperatura aos provedores e corrigir a tipagem
+    - `OllamaGeracao` envia `"options": {"temperature": t}` e `OpenAIGeracao` envia `"temperature": t`, recebendo `temperatura` no construtor
+    - Usar `TempoLimite` em `timeout_s` dos provedores de embeddings e de geração, no `Protocol` `ProvedorGeracao` e no `GeradorDeRespostas`
+    - `fabrica.py` repassa `config.timeout_geracao_s` e `config.temperatura_geracao` e não usa mais `# type: ignore[arg-type]`
+    - _Requirements: 3.6, 3.10, 3.13_
+  - [x] 17.3 Escrever teste de propriedade para tempo limite e temperatura
+    - **Property 28: Tempo limite e temperatura de geração são validados**
+    - **Validates: Requirements 3.10, 3.11, 3.13, 3.14**
+  - [x] 17.4 Escrever testes de exemplo dos provedores com temperatura e tempo limite
+    - Temperatura no corpo das requisições do Ollama e da OpenAI; tempo limite configurado repassado ao `httpx`; valores padrão quando as variáveis estão ausentes
+    - _Requirements: 3.6, 3.10, 3.13_
+- [x] 18. Tratar resposta só com marcadores como não fundamentada (Revisão 2)
+  - [x] 18.1 Implementar `tem_conteudo` em `chatbot.py` e usá-la em `responder`, inclusive na resposta do reforço comparativo
+    - _Requirements: 3.7, 3.12_
+  - [x] 18.2 Escrever teste de propriedade para resposta só com marcadores
+    - **Property 29: Resposta só com marcadores é não fundamentada**
+    - **Validates: Requirements 3.12, 3.7**
+- [x] 19. Detectar menção de arquivo como termo isolado (Revisão 2)
+  - [x] 19.1 Reescrever `fontes_mencionadas` com `(?<![\w])` + `re.escape(nome)` + `(?![\w])` e `re.IGNORECASE`, para o nome com e sem extensão
+    - _Requirements: 3.5_
+  - [x] 19.2 Escrever teste de propriedade para menção de arquivo
+    - **Property 30: Menção de arquivo exige termo isolado**
+    - **Validates: Requirements 3.5**
+- [x] 20. Tornar atômica a persistência do índice com manifesto (Revisão 2)
+  - [x] 20.1 Implementar o formato 2 em `indice_vetorial.py`
+    - `versoes/<id>/` com os três arquivos e `atual.json` trocado com um único `os.replace`, com `fsync` antes da troca
+    - Limpeza tolerante a falhas das versões não atuais depois da troca; versões órfãs ignoradas na carga
+    - Carga do formato 1 (arquivos na raiz) e migração na próxima gravação; manifesto para versão inexistente lança `ErroIndiceCorrompido`
+    - Ajustar os testes existentes que dependem do layout antigo (`tests/test_indice.py` e `_estado_em_disco` em `tests/test_ingestor_propriedades.py`)
+    - _Requirements: 1.10, 2.3, 2.14_
+  - [x] 20.2 Escrever teste de propriedade para gravação interrompida
+    - **Property 31: Gravação interrompida do índice preserva um estado completo**
+    - **Validates: Requirements 2.14, 1.10**
+  - [x] 20.3 Escrever testes de exemplo do formato 2
+    - Carga e migração do formato 1, manifesto apontando para versão inexistente, versão órfã ignorada e removida na gravação seguinte
+    - _Requirements: 2.3, 2.14_
+- [x] 21. Contêineres, integração contínua e documentação (Revisão 2)
+  - [x] 21.1 Atualizar `docker-compose.yml`
+    - Imagem `ollama/ollama:0.40.16`; serviço `ollama-init` que baixa os modelos e falha com `Falha ao baixar o modelo <nome>`; `chatbot` dependente de `ollama-init` com `service_completed_successfully`
+    - Repassar `TIMEOUT_GERACAO_S` e `TEMPERATURA_GERACAO`; manter volumes de modelos e índice e o usuário sem privilégios do `Dockerfile`
+    - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5, 10.6_
+  - [x] 21.2 Criar `.github/workflows/testes.yml`
+    - `push` e `pull_request` para `main`, matriz Python 3.11 e 3.12, instalação de `requirements-dev.txt` e do pacote, execução do `pytest`
+    - _Requirements: 9.6, 9.7, 9.8_
+  - [x] 21.3 Atualizar o `README.md`
+    - Badge do workflow de CI; instruções do Docker sem download manual de modelos; dica de modelo menor e de `TIMEOUT_GERACAO_S` para máquinas sem GPU; novas variáveis na tabela de parâmetros; manter as seções e formatos exigidos pelo teste de entrega
+    - _Requirements: 3.10, 3.13, 9.9, 10.7_
+  - [x] 21.4 Estender `tests/test_entrega.py`
+    - `Dockerfile` com usuário sem privilégios; compose com imagem fixada, `ollama-init` e `service_completed_successfully`; `.dockerignore`; workflow de CI; badge no README; `.gitattributes` com PDFs e PNGs binários; novas variáveis em `.env.example`
+    - _Requirements: 9.8, 9.9, 10.1, 10.2, 10.3, 10.5, 10.7_
+- [x] 22. Checkpoint da Revisão 2 - Ensure all tests pass
+  - Ensure all tests pass, ask the user if questions arise.
+  - Executar o Ambiente_de_Conteineres de verdade, recapturar as evidências com `scripts/capturar_evidencias.py` e regenerar as imagens com `scripts/renderizar_evidencias.py`
+
 ## Notes
+
 
 - Subtarefas marcadas com `*` são opcionais (testes) e podem ser puladas para um MVP mais rápido.
 - Cada propriedade do design é uma subtarefa própria, anotada com o número da propriedade e os requisitos que ela valida; cada teste de propriedade usa `@settings(max_examples=100)` ou mais e o comentário `# Feature: pdf-rag-chatbot, Property N: <texto>`.
@@ -329,6 +391,7 @@ Todo o código, os comentários, os nomes de domínio e as mensagens ao usuário
 - **Git:** todo o trabalho acontece em uma branch de trabalho (por exemplo, `feature/<descricao-curta>`), com `git add` de arquivos específicos e sem `--no-verify`. Commits e push direto na `main` só são permitidos se o remoto for `github.com/Gtvnv/*` (projeto novo e pessoal); em qualquer outro remoto a `main` não recebe commits e as mudanças chegam por Pull Request. `.env`, chaves e o diretório `data/` nunca são commitados.
 - **Fora do escopo do agente de código** (verificação manual do design): capturar os 3 ou mais prints reais em `docs/img/` com o provedor local (o teste de entrega 15.4 só passa por completo depois que as imagens existirem), criar o repositório Git novo e conferir com `git log` que não há histórico herdado nem o termo proibido nas mensagens de commit (Requisitos 8.4 e 9.1), e revisar o conteúdo qualitativo de insights e limitações.
 - O texto do README e dos demais arquivos do repositório não deve conter o termo proibido pelo Requisito 9.4.
+
 
 ## Task Dependency Graph
 
@@ -348,7 +411,11 @@ Todo o código, os comentários, os nomes de domínio e as mensagens ao usuário
     { "id": 10, "tasks": ["6.7", "11.6"] },
     { "id": 11, "tasks": ["6.8", "11.7"] },
     { "id": 12, "tasks": ["6.9"] },
-    { "id": 13, "tasks": ["6.10"] }
+    { "id": 13, "tasks": ["6.10"] },
+    { "id": 14, "tasks": ["17.1", "18.1", "19.1", "20.1", "21.1"] },
+    { "id": 15, "tasks": ["17.2", "18.2", "19.2", "20.2", "21.2"] },
+    { "id": 16, "tasks": ["17.3", "20.3", "21.3"] },
+    { "id": 17, "tasks": ["17.4", "21.4"] }
   ]
 }
 ```

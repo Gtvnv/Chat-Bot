@@ -436,7 +436,11 @@ def test_reindexar_substitui_os_trechos_do_arquivo(
 
 def _estado_em_disco(diretorio: Path) -> dict[str, bytes]:
     """Nome e conteúdo de todos os arquivos do diretório do índice."""
-    return {p.name: p.read_bytes() for p in sorted(diretorio.iterdir())}
+    return {
+        p.relative_to(diretorio).as_posix(): p.read_bytes()
+        for p in sorted(diretorio.rglob("*"))
+        if p.is_file()
+    }
 
 
 def _estado_em_memoria(indice: IndiceVetorial):

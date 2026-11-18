@@ -8,8 +8,10 @@ import httpx
 
 from pdf_rag_chatbot.erros import ErroProvedor
 from pdf_rag_chatbot.geracao.prompt import Mensagem
+from pdf_rag_chatbot.tipos import TempoLimite
 
 TIMEOUT_PADRAO_S = 60.0
+TEMPERATURA_PADRAO = 0.2
 
 
 class OllamaGeracao:
@@ -20,15 +22,17 @@ class OllamaGeracao:
         cliente: httpx.Client,
         host: str,
         nome_modelo: str,
-        timeout_s: float = TIMEOUT_PADRAO_S,
+        timeout_s: TempoLimite = TIMEOUT_PADRAO_S,
+        temperatura: float = TEMPERATURA_PADRAO,
     ) -> None:
         self._cliente = cliente
         self._url = f"{host.rstrip('/')}/api/chat"
         self.nome_modelo = nome_modelo
         self._timeout_s = timeout_s
+        self._temperatura = temperatura
 
     def completar(
-        self, mensagens: Sequence[Mensagem], timeout_s: float | None = None
+        self, mensagens: Sequence[Mensagem], timeout_s: TempoLimite | None = None
     ) -> str:
         timeout = self._timeout_s if timeout_s is None else timeout_s
         try:
@@ -38,6 +42,7 @@ class OllamaGeracao:
                     "model": self.nome_modelo,
                     "messages": [dict(m) for m in mensagens],
                     "stream": False,
+                    "options": {"temperature": self._temperatura},
                 },
                 timeout=timeout,
             )

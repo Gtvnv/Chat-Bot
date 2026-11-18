@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,6 +24,13 @@ TAMANHO_PADRAO = 1000
 SOBREPOSICAO_PADRAO = 200
 TOP_K_PADRAO = 4
 
+TIMEOUT_GERACAO_MINIMO = 10
+TIMEOUT_GERACAO_MAXIMO = 600
+TIMEOUT_GERACAO_PADRAO = 60
+TEMPERATURA_MINIMA = 0.0
+TEMPERATURA_MAXIMA = 1.0
+TEMPERATURA_PADRAO = 0.2
+
 Provedor = Literal["local", "externo"]
 
 
@@ -42,7 +50,8 @@ class Configuracao:
     modelo_embeddings_externo: str = "text-embedding-3-small"
     modelo_geracao_externo: str = "gpt-4o-mini"
     chave_api: str | None = field(default=None, repr=False)
-    timeout_geracao_s: float = 60.0
+    timeout_geracao_s: int = TIMEOUT_GERACAO_PADRAO
+    temperatura_geracao: float = TEMPERATURA_PADRAO
     timeout_conexao_local_s: float = 10.0
 
 
@@ -73,6 +82,35 @@ def validar_top_k(valor: object) -> int:
     return valor
 
 
+def validar_timeout_geracao(valor: object) -> int:
+    """Valida o tempo limite de geração (inteiro de 10 a 600 s) e devolve o valor como int."""
+    if (
+        not _eh_inteiro(valor)
+        or not TIMEOUT_GERACAO_MINIMO <= valor <= TIMEOUT_GERACAO_MAXIMO
+    ):
+        raise ErroConfiguracao(
+            f"Parâmetro TIMEOUT_GERACAO_S inválido: deve ser um inteiro entre "
+            f"{TIMEOUT_GERACAO_MINIMO} e {TIMEOUT_GERACAO_MAXIMO} segundos."
+        )
+    return valor
+
+
+def validar_temperatura(valor: object) -> float:
+    """Valida a temperatura de geração (número de 0 a 1, inclusive) e devolve um float."""
+    valido = (
+        isinstance(valor, (int, float))
+        and not isinstance(valor, bool)
+        and math.isfinite(valor)
+        and TEMPERATURA_MINIMA <= valor <= TEMPERATURA_MAXIMA
+    )
+    if not valido:
+        raise ErroConfiguracao(
+            f"Parâmetro TEMPERATURA_GERACAO inválido: deve ser um número entre "
+            f"{TEMPERATURA_MINIMA:g} e {TEMPERATURA_MAXIMA:g}."
+        )
+    return float(valor)  # type: ignore[arg-type]
+
+
 def carregar_configuracao(
     env: Mapping[str, str] | None = None,
     arquivo_env: Path | None = Path(".env"),
@@ -96,6 +134,13 @@ def carregar_configuracao(
     sobreposicao = _ler_inteiro(valores, "SOBREPOSICAO", SOBREPOSICAO_PADRAO)
     validar_parametros_chunking(tamanho, sobreposicao)
     top_k = validar_top_k(_ler_inteiro(valores, "TOP_K", TOP_K_PADRAO))
+
+    timeout_geracao = validar_timeout_geracao(
+        _ler_inteiro(valores, "TIMEOUT_GERACAO_S", TIMEOUT_GERACAO_PADRAO)
+    )
+    temperatura = validar_temperatura(
+        _ler_numero(valores, "TEMPERATURA_GERACAO", TEMPERATURA_PADRAO)
+    )
 
     chave_api: str | None = None
     if "externo" in (provedor_embeddings, provedor_geracao):
@@ -127,6 +172,8 @@ def carregar_configuracao(
             valores, "MODELO_GERACAO_EXTERNO", padrao.modelo_geracao_externo
         ),
         chave_api=chave_api,
+        timeout_geracao_s=timeout_geracao,
+        temperatura_geracao=temperatura,
     )
 
 
@@ -147,6 +194,20 @@ def _ler_provedor(valores: Mapping[str, str], nome: str) -> Provedor:
 def _ler_texto(valores: Mapping[str, str], nome: str, padrao: str) -> str:
     bruto = (valores.get(nome) or "").strip()
     return bruto or padrao
+
+
+def _ler_numero(valores: Mapping[str, str], nome: str, padrao: float) -> float | str:
+    """Lê um número decimal, aceitando ponto ou vírgula (0.2 ou 0,2).
+
+    Valor não numérico devolve o texto bruto para a validação rejeitar.
+    """
+    bruto = (valores.get(nome) or "").strip()
+    if not bruto:
+        return padrao
+    try:
+        return float(bruto.replace(",", "."))
+    except ValueError:
+        return bruto
 
 
 def _ler_inteiro(valores: Mapping[str, str], nome: str, padrao: int) -> int | str:

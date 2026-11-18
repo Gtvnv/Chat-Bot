@@ -7,6 +7,7 @@ from typing import Sequence
 import httpx
 
 from pdf_rag_chatbot.embeddings.ollama import TIMEOUT_PADRAO_S, validar_vetores
+from pdf_rag_chatbot.tipos import TempoLimite
 from pdf_rag_chatbot.erros import ErroChaveApi, ErroEmbeddings
 
 URL_EMBEDDINGS = "https://api.openai.com/v1/embeddings"
@@ -21,7 +22,7 @@ class OpenAIEmbeddings:
         cliente: httpx.Client,
         chave_api: str,
         nome_modelo: str,
-        timeout_s: float = TIMEOUT_PADRAO_S,
+        timeout_s: TempoLimite = TIMEOUT_PADRAO_S,
     ) -> None:
         self._cliente = cliente
         self._chave_api = chave_api

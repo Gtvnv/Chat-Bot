@@ -152,3 +152,177 @@ def test_propriedade_25_chave_em_branco_e_rejeitada(chave, embeddings, geracao):
         assert "OPENAI_API_KEY" in str(info.value)
         assert conectar.call_count == 0
         assert criar_conexao.call_count == 0
+
+
+# ---------------------------------------------------------------------------
+# Property 28: tempo limite e temperatura de geração
+# ---------------------------------------------------------------------------
+
+TIMEOUT_PADRAO = 60
+TEMPERATURA_PADRAO = 0.2
+
+# Valor de variável: ausente (None), vazio, inteiro (dentro e fora da faixa),
+# decimal com ponto ou vírgula, "0,5" e texto arbitrário.
+_texto_numerico = st.text(alphabet="0123456789.,-+eE _ax", max_size=8)
+valor_numerico_bruto = st.one_of(
+    st.none(),
+    st.sampled_from(["", "   ", "0,5", "0.5", "0,2", "1,0", "1,01", "-0,1", "abc", "nan", "inf"]),
+    st.integers(min_value=-50, max_value=1000).map(str),
+    st.integers(min_value=10, max_value=600).map(str),
+    st.integers(min_value=-5, max_value=5).map(str),
+    st.floats(min_value=-2, max_value=3, allow_nan=False).map(repr),
+    st.floats(min_value=0, max_value=1, allow_nan=False).map(
+        lambda f: repr(f).replace(".", ",")
+    ),
+    _texto_numerico,
+    st.text(max_size=10),
+)
+
+
+def _esperado_timeout(bruto: str | None) -> int | None:
+    """Devolve o timeout esperado ou None quando deve ser rejeitado."""
+    texto = (bruto or "").strip()
+    if not texto:
+        return TIMEOUT_PADRAO
+    try:
+        valor = int(texto)
+    except ValueError:
+        return None
+    return valor if 10 <= valor <= 600 else None
+
+
+def _esperada_temperatura(bruto: str | None) -> float | None:
+    """Devolve a temperatura esperada ou None quando deve ser rejeitada."""
+    texto = (bruto or "").strip()
+    if not texto:
+        return TEMPERATURA_PADRAO
+    try:
+        valor = float(texto.replace(",", "."))
+    except ValueError:
+        return None
+    return valor if 0.0 <= valor <= 1.0 else None
+
+
+def _env_geracao(timeout: str | None, temperatura: str | None) -> dict[str, str]:
+    env = {"PROVEDOR_EMBEDDINGS": "local", "PROVEDOR_GERACAO": "local"}
+    if timeout is not None:
+        env["TIMEOUT_GERACAO_S"] = timeout
+    if temperatura is not None:
+        env["TEMPERATURA_GERACAO"] = temperatura
+    return env
+
+
+# Feature: pdf-rag-chatbot, Property 28: Tempo limite e temperatura de geração são validados
+# **Validates: Requirements 3.10, 3.11, 3.13, 3.14**
+@settings(max_examples=300)
+@given(timeout=valor_numerico_bruto, temperatura=valor_numerico_bruto)
+def test_propriedade_28_validacao_de_timeout_e_temperatura(timeout, temperatura):
+    esperado_timeout = _esperado_timeout(timeout)
+    esperada_temperatura = _esperada_temperatura(temperatura)
+    env = _env_geracao(timeout, temperatura)
+
+    with mock.patch.object(
+        socket.socket, "connect", side_effect=AssertionError("requisição de rede")
+    ) as conectar, mock.patch.object(
+        socket, "create_connection", side_effect=AssertionError("requisição de rede")
+    ) as criar_conexao:
+        if esperado_timeout is not None and esperada_temperatura is not None:
+            config = carregar_configuracao(env=env, arquivo_env=None)
+            assert config.timeout_geracao_s == esperado_timeout
+            assert config.temperatura_geracao == pytest.approx(esperada_temperatura)
+        else:
+            with pytest.raises(ErroConfiguracao) as info:
+                carregar_configuracao(env=env, arquivo_env=None)
+            mensagem = str(info.value)
+            # O tempo limite é validado antes da temperatura.
+            if esperado_timeout is None:
+                assert "TIMEOUT_GERACAO_S" in mensagem
+                assert "10" in mensagem and "600" in mensagem
+            else:
+                assert "TEMPERATURA_GERACAO" in mensagem
+                assert "0" in mensagem and "1" in mensagem
+
+        assert conectar.call_count == 0
+        assert criar_conexao.call_count == 0
+
+
+# Valores aceitos: inteiros da faixa e temperaturas com ponto ou vírgula.
+_timeout_aceito = st.integers(min_value=10, max_value=600)
+_temperatura_aceita = st.floats(min_value=0, max_value=1, allow_nan=False)
+
+
+def _config_e_requisicoes(provedor: str, timeout: int, temperatura: float, usar_virgula: bool):
+    import httpx
+
+    from pdf_rag_chatbot.fabrica import criar_gerador_de_respostas
+
+    texto_temperatura = repr(temperatura)
+    if usar_virgula:
+        texto_temperatura = texto_temperatura.replace(".", ",")
+    env = {
+        "PROVEDOR_EMBEDDINGS": "local",
+        "PROVEDOR_GERACAO": provedor,
+        "OPENAI_API_KEY": CHAVE_VALIDA,
+        "TIMEOUT_GERACAO_S": str(timeout),
+        "TEMPERATURA_GERACAO": texto_temperatura,
+    }
+    config = carregar_configuracao(env=env, arquivo_env=None)
+    requisicoes: list[httpx.Request] = []
+
+    def tratar(requisicao: httpx.Request) -> httpx.Response:
+        requisicoes.append(requisicao)
+        if requisicao.url.path == "/api/chat":
+            return httpx.Response(200, json={"message": {"role": "assistant", "content": "ok"}})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    cliente = httpx.Client(transport=httpx.MockTransport(tratar))
+    try:
+        gerador = criar_gerador_de_respostas(config, cliente)
+        gerador.gerar("Pergunta?", [], [])
+    finally:
+        cliente.close()
+    return config, requisicoes
+
+
+# Feature: pdf-rag-chatbot, Property 28: Tempo limite e temperatura de geração são validados
+# **Validates: Requirements 3.10, 3.11, 3.13, 3.14**
+@settings(max_examples=100)
+@given(
+    timeout=_timeout_aceito,
+    temperatura=_temperatura_aceita,
+    usar_virgula=st.booleans(),
+)
+def test_propriedade_28_valores_aceitos_chegam_ao_ollama(timeout, temperatura, usar_virgula):
+    import json
+
+    config, requisicoes = _config_e_requisicoes("local", timeout, temperatura, usar_virgula)
+
+    assert config.timeout_geracao_s == timeout
+    assert len(requisicoes) == 1
+    requisicao = requisicoes[0]
+    assert requisicao.url.path == "/api/chat"
+    corpo = json.loads(requisicao.content)
+    assert corpo["options"]["temperature"] == pytest.approx(temperatura)
+    assert requisicao.extensions["timeout"]["read"] == timeout
+
+
+# Feature: pdf-rag-chatbot, Property 28: Tempo limite e temperatura de geração são validados
+# **Validates: Requirements 3.10, 3.11, 3.13, 3.14**
+@settings(max_examples=100)
+@given(
+    timeout=_timeout_aceito,
+    temperatura=_temperatura_aceita,
+    usar_virgula=st.booleans(),
+)
+def test_propriedade_28_valores_aceitos_chegam_a_openai(timeout, temperatura, usar_virgula):
+    import json
+
+    config, requisicoes = _config_e_requisicoes("externo", timeout, temperatura, usar_virgula)
+
+    assert config.timeout_geracao_s == timeout
+    assert len(requisicoes) == 1
+    requisicao = requisicoes[0]
+    assert requisicao.url.path == "/v1/chat/completions"
+    corpo = json.loads(requisicao.content)
+    assert corpo["temperature"] == pytest.approx(temperatura)
+    assert requisicao.extensions["timeout"]["read"] == timeout

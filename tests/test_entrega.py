@@ -1,7 +1,8 @@
 """Testes de fumaça de entrega: .gitignore, .env.example, dependências, licença,
 inputs/, README e varredura do termo proibido.
 
-Requisitos: 6.1, 6.2, 7.1, 7.2, 7.3, 8.4, 8.9, 9.2, 9.3, 9.4.
+Requisitos: 6.1, 6.2, 7.1, 7.2, 7.3, 8.4, 8.9, 9.2, 9.3, 9.4, 9.8, 9.9,
+10.1, 10.2, 10.3, 10.5, 10.7.
 """
 
 from __future__ import annotations
@@ -34,6 +35,8 @@ VARIAVEIS_ESPERADAS = (
     "SOBREPOSICAO",
     "TOP_K",
     "DIRETORIO_INDICE",
+    "TIMEOUT_GERACAO_S",
+    "TEMPERATURA_GERACAO",
 )
 
 
@@ -220,6 +223,96 @@ def test_arquivos_referenciados_no_readme_existem() -> None:
     imagens = {c for _, c in _imagens_do_readme()}
     inexistentes = sorted(r for r in referencias - imagens if not (RAIZ / r).exists())
     assert not inexistentes, f"arquivos referenciados no README não existem: {inexistentes}"
+
+
+# ------------------------------------------------------------ 10 Docker, CI e atributos
+def _texto(*partes: str) -> str:
+    return RAIZ.joinpath(*partes).read_text(encoding="utf-8")
+
+
+def _sem_comentarios(texto: str) -> str:
+    return "\n".join(ln for ln in texto.splitlines() if not ln.strip().startswith("#"))
+
+
+def _bloco_servico(compose: str, nome: str) -> str:
+    """Texto do serviço ``nome`` (até o próximo serviço ou seção de nível raiz)."""
+    achado = re.search(
+        rf"^  {re.escape(nome)}:\s*$(.*?)(?=^  \S|^\S|\Z)", compose, re.MULTILINE | re.DOTALL
+    )
+    assert achado, f"serviço '{nome}' ausente no docker-compose.yml"
+    return achado.group(1)
+
+
+def test_dockerfile_com_usuario_sem_privilegios_e_requirements() -> None:
+    dockerfile = _sem_comentarios(_texto("Dockerfile"))
+    assert re.search(r"^FROM python:\S+", dockerfile, re.MULTILINE)
+    assert re.search(r"requirements\.txt", dockerfile)
+    assert re.search(r"pip install .*-r requirements\.txt", dockerfile)
+    usuarios = re.findall(r"^USER\s+(\S+)", dockerfile, re.MULTILINE)
+    assert usuarios, "instrução USER ausente"
+    assert usuarios[-1].split(":")[0] not in ("root", "0")
+
+
+def test_compose_fixa_etiqueta_das_imagens() -> None:
+    compose = _sem_comentarios(_texto("docker-compose.yml"))
+    imagens = re.findall(r"^\s*image:\s*(\S+)", compose, re.MULTILINE)
+    assert imagens, "nenhuma imagem declarada"
+    for imagem in imagens:
+        assert ":" in imagem.rsplit("/", 1)[-1], f"imagem sem etiqueta: {imagem}"
+        assert imagem.rsplit(":", 1)[-1] != "latest", f"etiqueta 'latest': {imagem}"
+
+
+def test_compose_ollama_init_baixa_modelos_e_chatbot_aguarda_conclusao() -> None:
+    compose = _texto("docker-compose.yml")
+    init = _bloco_servico(compose, "ollama-init")
+    assert "ollama pull" in init
+    assert "Falha ao baixar o modelo" in init
+    chatbot = _bloco_servico(compose, "chatbot")
+    assert re.search(
+        r"depends_on:\s*\n\s+ollama-init:\s*\n\s+condition:\s*service_completed_successfully",
+        chatbot,
+    )
+
+
+def test_compose_volumes_nomeados_e_variaveis_de_geracao() -> None:
+    compose = _texto("docker-compose.yml")
+    volumes = re.search(r"^volumes:\s*$(.*)", compose, re.MULTILINE | re.DOTALL)
+    assert volumes, "seção de volumes nomeados ausente"
+    nomes = re.findall(r"^  ([\w\-]+):", volumes.group(1), re.MULTILINE)
+    assert len(nomes) >= 2, f"volumes nomeados: {nomes}"
+    assert re.search(r"^\s+- ollama-modelos:/root/\.ollama", compose, re.MULTILINE)
+    assert re.search(r"^\s+- indice:/app/data", compose, re.MULTILINE)
+    chatbot = _bloco_servico(compose, "chatbot")
+    assert "TIMEOUT_GERACAO_S:" in chatbot
+    assert "TEMPERATURA_GERACAO:" in chatbot
+
+
+def test_dockerignore_exclui_segredos_indice_e_ambientes() -> None:
+    entradas = {e.rstrip("/") for e in _linhas_sem_comentario(RAIZ / ".dockerignore")}
+    for esperado in (".env", "data", ".venv", "venv"):
+        assert esperado in entradas, f".dockerignore sem '{esperado}'"
+
+
+def test_workflow_de_ci_roda_pytest_em_push_e_pull_request_na_main() -> None:
+    fluxo = _sem_comentarios(_texto(".github", "workflows", "testes.yml"))
+    for evento in ("push", "pull_request"):
+        assert re.search(rf"^  {evento}:\s*\n\s+branches:\s*\[[^\]]*\bmain\b", fluxo, re.MULTILINE), evento
+    assert re.search(r"pip install -r requirements-dev\.txt", fluxo)
+    assert re.search(r"run:\s*pytest\b", fluxo)
+
+
+def test_readme_tem_badge_e_orienta_sobre_modelo_menor_e_tempo_limite() -> None:
+    texto = README.read_text(encoding="utf-8")
+    assert "actions/workflows/testes.yml/badge.svg" in texto
+    assert "TIMEOUT_GERACAO_S" in texto
+    assert "llama3.2:1b" in texto
+
+
+def test_gitattributes_marca_pdf_e_png_como_binarios() -> None:
+    entradas = [ln.split() for ln in _linhas_sem_comentario(RAIZ / ".gitattributes")]
+    atributos = {e[0]: e[1:] for e in entradas if len(e) > 1}
+    assert "binary" in atributos.get("*.pdf", [])
+    assert "binary" in atributos.get("*.png", [])
 
 
 # ------------------------------------------------------------ 9.4 termo proibido

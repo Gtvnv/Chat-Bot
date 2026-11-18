@@ -24,6 +24,8 @@ O cenário de uso é o de um estudante de Engenharia de Software que escreve o T
 - **Readme**: Arquivo `README.md` na raiz do repositório com a documentação do projeto.
 - **Repositorio**: Repositório Git do projeto no GitHub.
 - **Top_K**: Número de Trechos que o Recuperador devolve por pergunta.
+- **Tempo_Limite_de_Geracao**: Tempo máximo, em segundos, que o Chatbot aguarda a resposta de um provedor de geração (padrão 60).
+- **Ambiente_de_Conteineres**: Conjunto de serviços definido no arquivo `docker-compose.yml` do Repositorio, que executa o Chatbot e o Provedor_Local em contêineres.
 
 ## Requirements
 
@@ -67,6 +69,7 @@ O cenário de uso é o de um estudante de Engenharia de Software que escreve o T
 11. IF a pergunta contém mais de 2.000 caracteres após remover espaços em branco nas extremidades, THEN THE Chatbot SHALL rejeitar a pergunta e exibir um erro de limite de caracteres que informe o limite de 2.000 caracteres.
 12. IF a pergunta contém mais de 2.000 caracteres após remover espaços em branco nas extremidades, THEN THE Chatbot SHALL não acionar o Recuperador.
 13. IF a pergunta contém mais de 2.000 caracteres após remover espaços em branco nas extremidades, THEN THE Chatbot SHALL não adicionar a entrada ao histórico.
+14. IF a gravação do Indice_Vetorial em disco é interrompida em qualquer ponto (por exemplo, falha de escrita ou encerramento do processo), THEN THE Indice_Vetorial SHALL, na carga seguinte, conter exatamente o estado anterior completo ou o novo estado completo, nunca uma combinação dos dois, e SHALL não deixar arquivos temporários visíveis como parte do índice.
 
 ### Requirement 3: Gerar respostas fundamentadas com citações
 
@@ -78,11 +81,16 @@ O cenário de uso é o de um estudante de Engenharia de Software que escreve o T
 2. THE Gerador_de_Respostas SHALL redigir a resposta em português, exceto trechos citados literalmente em outro idioma, que SHALL aparecer entre aspas e no idioma original.
 3. WHEN o Gerador_de_Respostas produz uma resposta, THE Chatbot SHALL exibir, junto à resposta, a lista de Citacoes dos Trechos efetivamente usados na resposta, sem repetições, com cada Citacao identificando o arquivo de origem e a localização do Trecho no arquivo.
 4. IF o Recuperador devolve 0 Trechos ou os Trechos recuperados não contêm informação suficiente para responder à pergunta, THEN THE Chatbot SHALL exibir uma mensagem informando que a resposta não foi encontrada nos documentos carregados, SHALL NOT exibir lista de Citacoes e SHALL manter a sessão ativa para novas perguntas.
-5. WHEN o usuário pergunta sobre a relação entre dois ou mais documentos, THE Recuperador SHALL buscar Trechos de pelo menos 2 arquivos distintos mencionados na pergunta, e THE Gerador_de_Respostas SHALL indicar pelo menos uma Citacao para cada arquivo comparado na resposta.
-6. IF o Provedor_Externo ou o Provedor_Local retorna erro ou não responde em 60 segundos, THEN THE Chatbot SHALL interromper a requisição, exibir uma mensagem de erro indicando a falha de comunicação com o provedor, SHALL NOT exibir resposta parcial ou Citacoes, SHALL preservar o histórico da conversa e SHALL manter a sessão ativa para novas perguntas.
+5. WHEN o usuário pergunta sobre a relação entre dois ou mais documentos, considerando mencionado o arquivo cujo nome, com ou sem extensão e sem diferenciar maiúsculas de minúsculas, aparece na pergunta como termo isolado (delimitado pelo início ou fim da pergunta ou por caracteres que não sejam letras, dígitos ou sublinhado), THE Recuperador SHALL buscar Trechos de pelo menos 2 arquivos distintos mencionados na pergunta, e THE Gerador_de_Respostas SHALL indicar pelo menos uma Citacao para cada arquivo comparado na resposta.
+6. IF o Provedor_Externo ou o Provedor_Local retorna erro ou não responde dentro do Tempo_Limite_de_Geracao, THEN THE Chatbot SHALL interromper a requisição, exibir uma mensagem de erro indicando a falha de comunicação com o provedor, SHALL NOT exibir resposta parcial ou Citacoes, SHALL preservar o histórico da conversa e SHALL manter a sessão ativa para novas perguntas.
 7. IF a resposta gerada para uma pergunta com Trechos recuperados não contém nenhuma Citacao, THEN THE Chatbot SHALL exibir uma mensagem informando que a resposta não pôde ser fundamentada nos documentos carregados, em vez de exibir a resposta sem Citacoes.
-8. IF o Provedor_Externo ou o Provedor_Local retorna erro ou não responde em 60 segundos, THEN THE Chatbot SHALL descartar completamente os Trechos recuperados e qualquer Citacao associada à pergunta.
-9. IF o Provedor_Externo ou o Provedor_Local retorna erro ou não responde em 60 segundos, THEN THE Chatbot SHALL não reter Trechos nem Citacoes para reutilização em uma nova tentativa da mesma pergunta.
+8. IF o Provedor_Externo ou o Provedor_Local retorna erro ou não responde dentro do Tempo_Limite_de_Geracao, THEN THE Chatbot SHALL descartar completamente os Trechos recuperados e qualquer Citacao associada à pergunta.
+9. IF o Provedor_Externo ou o Provedor_Local retorna erro ou não responde dentro do Tempo_Limite_de_Geracao, THEN THE Chatbot SHALL não reter Trechos nem Citacoes para reutilização em uma nova tentativa da mesma pergunta.
+10. THE Chatbot SHALL ler o Tempo_Limite_de_Geracao da variável `TIMEOUT_GERACAO_S`, aceitando apenas inteiros entre 10 e 600, com valor padrão de 60 quando a variável estiver ausente ou vazia.
+11. IF o valor de `TIMEOUT_GERACAO_S` não é um inteiro entre 10 e 600, THEN THE Chatbot SHALL encerrar a inicialização com código de saída diferente de zero, SHALL exibir uma mensagem de erro com o nome da variável e a faixa aceita, e SHALL não enviar nenhuma requisição de rede.
+12. IF a resposta gerada, após remover os marcadores de Citacao, os sinais de pontuação e os espaços em branco, não contém nenhuma letra ou dígito, THEN THE Chatbot SHALL tratá-la como não fundamentada, exibindo a mensagem do critério 7 sem a resposta e sem Citacoes.
+13. THE Gerador_de_Respostas SHALL enviar ao provedor de geração uma temperatura lida da variável `TEMPERATURA_GERACAO`, aceitando apenas números entre 0 e 1 (inclusive), com valor padrão de 0,2 quando a variável estiver ausente ou vazia.
+14. IF o valor de `TEMPERATURA_GERACAO` não é um número entre 0 e 1, THEN THE Chatbot SHALL encerrar a inicialização com código de saída diferente de zero, SHALL exibir uma mensagem de erro com o nome da variável e a faixa aceita, e SHALL não enviar nenhuma requisição de rede.
 
 ### Requirement 4: Conversar de forma interativa
 
@@ -171,3 +179,19 @@ O cenário de uso é o de um estudante de Engenharia de Software que escreve o T
 5. THE Repositorio SHALL conter testes automatizados que cubram as funções de divisão de Trechos, de recuperação e de formatação de Citacoes, com no mínimo um teste de caso de sucesso e um teste de caso de borda ou entrada inválida por função.
 6. WHEN o conjunto de testes automatizados é executado em um ambiente com as dependências declaradas instaladas, THE Repositorio SHALL concluir a execução com todos os testes aprovados e código de saída 0.
 7. IF a execução do conjunto de testes automatizados tiver ao menos um teste reprovado, THEN THE Repositorio SHALL encerrar a execução com código de saída diferente de 0 e identificar cada teste reprovado na saída.
+8. WHEN um commit é enviado ou um pull request é aberto para a branch `main` do Repositorio, THE Repositorio SHALL executar automaticamente, em um serviço de integração contínua, o conjunto de testes automatizados com as dependências declaradas, e SHALL marcar a execução como reprovada quando qualquer teste for reprovado.
+9. THE Readme SHALL exibir um indicador (badge) do resultado da execução mais recente da integração contínua na branch `main`.
+
+### Requirement 10: Executar em contêineres
+
+**User Story:** Como visitante do portfólio, quero executar o Chatbot com contêineres, para que eu reproduza a demonstração sem instalar Python nem o Provedor_Local na minha máquina.
+
+#### Acceptance Criteria
+
+1. THE Repositorio SHALL conter um `Dockerfile` que construa a imagem do Chatbot com as dependências de execução declaradas e que execute a aplicação com um usuário sem privilégios de administrador.
+2. THE Ambiente_de_Conteineres SHALL definir um serviço do Provedor_Local com imagem de versão fixada (sem a etiqueta `latest`) e um serviço do Chatbot que use esse Provedor_Local.
+3. WHEN o Ambiente_de_Conteineres é iniciado, THE Ambiente_de_Conteineres SHALL baixar automaticamente, antes de o serviço do Chatbot iniciar, os modelos de embeddings e de geração configurados, sem exigir comandos manuais de download.
+4. IF o download automático de algum modelo falha, THEN THE Ambiente_de_Conteineres SHALL não iniciar o serviço do Chatbot e SHALL exibir no log o nome do modelo que falhou.
+5. THE Ambiente_de_Conteineres SHALL excluir da imagem do Chatbot o Arquivo_de_Ambiente, o Indice_Vetorial persistido e os diretórios de ambientes virtuais.
+6. THE Ambiente_de_Conteineres SHALL persistir os modelos baixados e o Indice_Vetorial em volumes, de modo que reiniciar os contêineres não exija baixar os modelos nem reindexar os arquivos.
+7. THE Readme SHALL conter instruções de execução com o Ambiente_de_Conteineres, incluindo como usar um modelo de geração menor em máquinas sem GPU.

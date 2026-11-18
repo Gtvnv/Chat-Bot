@@ -1,7 +1,7 @@
 $ python -m pdf_rag_chatbot
 PDF RAG Chatbot. Comandos: carregar <caminhos>, documentos, topk <n>, sair. Qualquer outra entrada é tratada como pergunta.
 > Segundo sentencas.txt, por que cobertura de código alta não garante qualidade?
-[1] Cobertura de código alta não garante qualidade, pois um teste sem asserções executa linhas sem validar nenhum comportamento.
+De acordo com [1], a cobertura de código alta não garante qualidade porque um teste sem asserções executa linhas sem validar nenhum comportamento.
 Fontes:
 sentencas.txt, linha 4
 > sair

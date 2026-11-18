@@ -6,6 +6,7 @@ from typing import Any, Sequence
 
 import httpx
 
+from pdf_rag_chatbot.tipos import TempoLimite
 from pdf_rag_chatbot.erros import ErroEmbeddings
 
 TIMEOUT_PADRAO_S = 60.0
@@ -33,7 +34,7 @@ class OllamaEmbeddings:
         cliente: httpx.Client,
         host: str,
         nome_modelo: str,
-        timeout_s: float = TIMEOUT_PADRAO_S,
+        timeout_s: TempoLimite = TIMEOUT_PADRAO_S,
     ) -> None:
         self._cliente = cliente
         self._url = f"{host.rstrip('/')}/api/embed"

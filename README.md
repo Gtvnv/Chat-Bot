@@ -8,7 +8,7 @@
 <img alt="Docker" src="https://img.shields.io/badge/Docker-compose-2496ED?logo=docker&logoColor=white">
 <img alt="Ollama" src="https://img.shields.io/badge/Ollama-local%20e%20gratuito-000000">
 <img alt="OpenAI" src="https://img.shields.io/badge/OpenAI-opcional-412991?logo=openai&logoColor=white">
-<img alt="Testes" src="https://img.shields.io/badge/testes-pytest%20%2B%20hypothesis-0A9EDC?logo=pytest&logoColor=white">
+<a href="https://github.com/Gtvnv/Chat-Bot/actions/workflows/testes.yml"><img alt="Testes" src="https://github.com/Gtvnv/Chat-Bot/actions/workflows/testes.yml/badge.svg"></a>
 <img alt="Licença" src="https://img.shields.io/badge/licen%C3%A7a-MIT-green">
 
 [Descrição](#descrição-do-projeto) •
@@ -44,23 +44,32 @@ Os objetivos do projeto são: (1) oferecer uma ferramenta útil para revisão bi
 
 ### Rodando com Docker (recomendado)
 
-Só é preciso ter o [Docker](https://www.docker.com/) com Compose. O `docker-compose.yml` sobe o Ollama e o chatbot juntos, no modo local gratuito.
+Só é preciso ter o [Docker](https://www.docker.com/) com Compose. O `docker-compose.yml` sobe o Ollama (imagem `ollama/ollama:0.40.16`) e o chatbot juntos, no modo local gratuito. O serviço `ollama-init` baixa os modelos sozinho, sem nenhum `ollama pull` manual, e o chatbot só inicia depois que o download termina.
 
 ```bash
 git clone https://github.com/Gtvnv/Chat-Bot.git
 cd Chat-Bot
 
-# 1. Sobe o Ollama e baixa os modelos (uma vez só, cerca de 2,3 GB)
-docker compose up -d ollama
-docker compose exec ollama ollama pull nomic-embed-text
-docker compose exec ollama ollama pull llama3.2
-
-# 2. Indexa os arquivos de exemplo e abre a sessão interativa
+# Indexa os arquivos de exemplo e abre a sessão interativa.
+# O primeiro comando sobe o ollama e o ollama-init automaticamente;
+# na primeira vez, o download dos modelos leva alguns minutos (cerca de 2,3 GB).
 docker compose run --rm chatbot carregar inputs inputs/sentencas.txt
 docker compose run --rm chatbot
 ```
 
-> 💡 **Sem GPU?** Em CPU o `llama3.2` pode passar do limite de 60 s por resposta. Use o modelo menor: `docker compose exec ollama ollama pull llama3.2:1b` e rode com `MODELO_GERACAO_LOCAL=llama3.2:1b TOP_K=2 docker compose run --rm chatbot`. Os prints deste README foram feitos assim.
+> 💡 **Sem GPU?** Em CPU o `llama3.2` pode ser lento e estourar o tempo limite de resposta (60 s por padrão). Use um modelo menor com `MODELO_GERACAO_LOCAL=llama3.2:1b`, aumente o tempo limite com `TIMEOUT_GERACAO_S` (de 10 a 600 s) ou combine os dois. Os prints deste README foram feitos com `llama3.2` e `TIMEOUT_GERACAO_S=600`.
+>
+> ```bash
+> # Linux/macOS (bash)
+> MODELO_GERACAO_LOCAL=llama3.2:1b TIMEOUT_GERACAO_S=300 docker compose run --rm chatbot
+> ```
+>
+> ```powershell
+> # Windows (PowerShell)
+> $env:MODELO_GERACAO_LOCAL = "llama3.2:1b"
+> $env:TIMEOUT_GERACAO_S = "300"
+> docker compose run --rm chatbot
+> ```
 
 ### Pré-requisitos (execução sem Docker)
 
@@ -170,6 +179,8 @@ Na inicialização, o chatbot avisa que trechos serão enviados a terceiros e nu
 | `SOBREPOSICAO` | 0 a 50% do tamanho | 200 |
 | `TOP_K` | 1 a 20 | 4 |
 | `DIRETORIO_INDICE` | caminho | `data/index` |
+| `TIMEOUT_GERACAO_S` | 10 a 600 segundos | 60 |
+| `TEMPERATURA_GERACAO` | 0 a 1 (aceita ponto ou vírgula) | 0,2 |
 
 </details>
 
@@ -184,7 +195,7 @@ A suíte tem testes de exemplo e testes baseados em propriedades (Hypothesis, 10
 
 ## Prints de tela
 
-Todos os prints são sessões reais da CLI rodando no contêiner do `docker-compose.yml`, com Ollama local (`nomic-embed-text` e `llama3.2:1b`, `TOP_K=2`, em CPU). As transcrições de texto estão em `docs/evidencias/` e as imagens foram geradas a partir delas por `scripts/renderizar_evidencias.py`. Para refazer: `docker compose run --rm -v "$PWD/docs:/app/docs" --entrypoint python chatbot scripts/capturar_evidencias.py`.
+Todos os prints são sessões reais da CLI rodando no contêiner do `docker-compose.yml`, com Ollama local (`nomic-embed-text` e `llama3.2`, `TOP_K=3`, `TIMEOUT_GERACAO_S=600`, temperatura 0,2, em CPU, sem GPU). Os tempos medidos foram de cerca de 16 s para carregar os arquivos, 2 min para a pergunta com citações, 2,7 min para a comparativa e 28 s para a de sentenças. O print 5 foi feito com `TIMEOUT_GERACAO_S=10` para provocar o tempo limite. As transcrições de texto estão em `docs/evidencias/` e as imagens foram geradas a partir delas por `scripts/renderizar_evidencias.py`. Para refazer: `docker compose run --rm -v "$PWD/docs:/app/docs" --entrypoint python chatbot scripts/capturar_evidencias.py`.
 
 **1. Carregando os arquivos de exemplo e listando os documentos**
 
@@ -224,7 +235,7 @@ O Ingestor lê cada PDF página por página com a biblioteca `pypdf`, preservand
 
 ### Indexação
 
-Cada trecho recebe exatamente um embedding, sempre do mesmo modelo, gerado pelo Ollama ou pela API externa. O índice vetorial guarda vetor, texto, arquivo e página e é gravado em disco (`data/index` por padrão), então não é preciso reindexar ao reiniciar. Recarregar um PDF já indexado substitui os trechos antigos desse arquivo, e uma falha no meio do processo preserva o estado anterior.
+Cada trecho recebe exatamente um embedding, sempre do mesmo modelo, gerado pelo Ollama ou pela API externa. O índice vetorial guarda vetor, texto, arquivo e página e é gravado em disco (`data/index` por padrão), então não é preciso reindexar ao reiniciar. Recarregar um PDF já indexado substitui os trechos antigos desse arquivo, e uma falha no meio do processo preserva o estado anterior. A gravação usa a troca atômica do manifesto, que só passa a apontar para os novos dados quando todos estão gravados.
 
 ### Recuperação
 
@@ -232,7 +243,7 @@ A pergunta é convertida em embedding com o mesmo modelo dos trechos e comparada
 
 ### Geração
 
-O modelo recebe a pergunta, os trechos recuperados e as cinco interações mais recentes da sessão, e responde em português com até 2.000 caracteres. O chatbot exibe a resposta junto com a lista de citações sem repetições. Se não houver informação suficiente, ou se a resposta vier sem citações, ele avisa que não foi possível fundamentá-la nos documentos. Se o provedor falhar ou demorar mais de 60 segundos, a sessão continua e nada parcial é exibido.
+O modelo recebe a pergunta, os trechos recuperados e as cinco interações mais recentes da sessão, e responde em português com até 2.000 caracteres. O chatbot exibe a resposta junto com a lista de citações sem repetições. Se não houver informação suficiente, ou se a resposta vier sem citações, ele avisa que não foi possível fundamentá-la nos documentos, e uma resposta composta só por marcadores também é descartada. A temperatura de geração é configurável (`TEMPERATURA_GERACAO`, padrão 0,2). Se o provedor falhar ou demorar mais que o tempo limite (`TIMEOUT_GERACAO_S`, padrão 60 segundos), a sessão continua e nada parcial é exibido.
 
 <details>
 <summary><b>Estrutura do código</b></summary>
@@ -268,8 +279,8 @@ O arquivo `inputs/sentencas.txt` reúne 20 sentenças sobre testes, arquitetura 
 
 - PDFs digitalizados (apenas imagem) não têm texto extraível, e não há OCR.
 - O índice vetorial é simples (arrays NumPy em disco, busca por força bruta), adequado para poucos milhares de trechos, e não para grandes coleções.
-- Modelos locais pequenos erram mais. Nas sessões dos prints, o `llama3.2:1b` às vezes trouxe uma fonte pouco relevante, respondeu só com marcadores ou não fundamentou a resposta comparativa, e foi preciso repetir a pergunta.
-- Em CPU, a geração local é lenta e pode estourar o limite fixo de 60 s (print 5).
+- Modelos locais pequenos erram mais. Nas sessões dos prints (`llama3.2`, `TOP_K=3`), a pergunta comparativa citou trechos de só um dos dois documentos e a CLI avisou isso; repetida duas vezes, o resultado não melhorou.
+- Em CPU, a geração local é lenta e pode estourar o limite padrão de 60 s. As respostas dos prints levaram de 28 s a 2,7 min com `TIMEOUT_GERACAO_S=600`, e o print 5 usa `TIMEOUT_GERACAO_S=10` para mostrar o tratamento do tempo limite. O limite é configurável por `TIMEOUT_GERACAO_S` (10 a 600 s), e um modelo menor ajuda.
 - A divisão em trechos por tamanho fixo pode cortar frases, tabelas ou fórmulas e separar informação relacionada.
 - A interface é apenas de linha de comando, o histórico existe só durante a sessão e a resposta é limitada a 2.000 caracteres.
 
@@ -279,7 +290,7 @@ O arquivo `inputs/sentencas.txt` reúne 20 sentenças sobre testes, arquitetura 
 - Adicionar OCR para PDFs digitalizados.
 - Dividir os trechos por estrutura (seções e parágrafos) em vez de tamanho fixo.
 - Reordenar os resultados (re-ranking) e combinar busca vetorial com busca por palavras-chave.
-- Tornar o tempo limite configurável e exibir a resposta em streaming.
+- Exibir a resposta em streaming, à medida que o modelo a produz.
 - Criar uma interface web e suporte a outros provedores de IA.
 
 ## Uso responsável

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from enum import Enum
 
 from pdf_rag_chatbot import mensagens
@@ -19,6 +20,7 @@ __all__ = [
     "Interacao",
     "normalizar_pergunta",
     "reconhecer_comando",
+    "tem_conteudo",
     "validar_pergunta",
 ]
 
@@ -43,6 +45,14 @@ def validar_pergunta(entrada: str) -> str:
     if len(pergunta) > mensagens.LIMITE_PERGUNTA:
         raise ErroPergunta(mensagens.PERGUNTA_LONGA)
     return pergunta
+
+
+_MARCADOR = re.compile(r"\[\d+\]")
+
+
+def tem_conteudo(texto: str) -> bool:
+    """Indica se resta alguma letra ou dígito após remover marcadores `[n]`, pontuação e espaços."""
+    return any(c.isalnum() for c in _MARCADOR.sub("", texto))
 
 
 def reconhecer_comando(entrada: str) -> Comando | None:
@@ -104,7 +114,7 @@ class Chatbot:
             return self._registrar(pergunta, RespostaChatbot(mensagens.NAO_ENCONTRADA))
 
         citacoes = extrair_citacoes(texto, trechos)
-        if not citacoes:
+        if not tem_conteudo(texto) or not citacoes:
             return self._registrar(pergunta, RespostaChatbot(mensagens.NAO_FUNDAMENTADA))
 
         mencionadas = fontes_mencionadas(pergunta, self._indice.listar_fontes())
@@ -116,7 +126,7 @@ class Chatbot:
                 texto2 = self._gerador.gerar(f"{pergunta}\n\n{reforco}", trechos, janela)
                 if not self._e_sentinela(texto2):
                     citacoes2 = extrair_citacoes(texto2, trechos)
-                    if citacoes2:
+                    if citacoes2 and tem_conteudo(texto2):
                         texto, citacoes = texto2, citacoes2
                 faltando = self._faltando(mencionadas, citacoes)
                 if faltando:

@@ -11,7 +11,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from pdf_rag_chatbot import mensagens
-from pdf_rag_chatbot.chatbot import Chatbot
+from pdf_rag_chatbot.chatbot import Chatbot, tem_conteudo
 from pdf_rag_chatbot.embeddings import GeradorDeEmbeddings
 from pdf_rag_chatbot.erros import ErroEmbeddings, ErroPergunta, ErroProvedor
 from pdf_rag_chatbot.geracao.base import GeradorDeRespostas
@@ -309,3 +309,59 @@ def test_falha_do_provedor_nao_deixa_rastros(
         assert len(chatbot.historico) == len(historico_antes) + 1
         assert chatbot.historico[:-1] == historico_antes
         assert chatbot.historico[-1].pergunta == pergunta_final.strip()
+
+
+_MARCADORES_QUALQUER = st.sampled_from(["[1]", "[2]", "[0]", "[99]", "[1000]"])
+_SO_MARCADORES = st.lists(
+    st.one_of(
+        _MARCADORES_QUALQUER,
+        st.text(alphabet=" \t\n.,;:!?-—…()\"'", min_size=1, max_size=4),
+    ),
+    min_size=1,
+    max_size=8,
+).map("".join)
+_TEXTO_COM_CONTEUDO = st.text(
+    alphabet=st.characters(whitelist_categories=("L", "N")), min_size=1, max_size=40
+)
+
+
+@settings(max_examples=100, deadline=None)
+@given(resposta_modelo=_SO_MARCADORES, pergunta=_PALAVRAS)
+def test_resposta_so_com_marcadores_e_nao_fundamentada(
+    resposta_modelo: str, pergunta: str
+) -> None:
+    # Feature: pdf-rag-chatbot, Property 29: Resposta só com marcadores é não fundamentada
+    # **Validates: Requirements 3.12, 3.7**
+    assert not tem_conteudo(resposta_modelo)
+    with tempfile.TemporaryDirectory() as tmp:
+        chatbot, _, geracao = _criar_chatbot(Path(tmp) / "indice")
+        geracao.respostas = [resposta_modelo]
+
+        resposta = chatbot.responder(pergunta)
+
+        assert resposta.texto == mensagens.NAO_FUNDAMENTADA
+        assert resposta.citacoes == ()
+
+
+@settings(max_examples=100, deadline=None)
+@given(
+    conteudo=_TEXTO_COM_CONTEUDO,
+    pontuacao=st.text(alphabet=".,;:!?", max_size=3),
+    pergunta=_PALAVRAS,
+)
+def test_resposta_com_conteudo_e_citacao_valida_e_exibida(
+    conteudo: str, pontuacao: str, pergunta: str
+) -> None:
+    # Feature: pdf-rag-chatbot, Property 29: Resposta só com marcadores é não fundamentada
+    # **Validates: Requirements 3.12, 3.7**
+    texto_modelo = f"{conteudo}{pontuacao} [1]"
+    assert tem_conteudo(texto_modelo)
+    with tempfile.TemporaryDirectory() as tmp:
+        chatbot, _, geracao = _criar_chatbot(Path(tmp) / "indice")
+        geracao.respostas = [texto_modelo]
+
+        resposta = chatbot.responder(pergunta)
+
+        assert resposta.texto != mensagens.NAO_FUNDAMENTADA
+        assert conteudo in resposta.texto
+        assert len(resposta.citacoes) >= 1

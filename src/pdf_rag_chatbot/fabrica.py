@@ -74,7 +74,7 @@ def criar_provedor_embeddings(
             cliente,
             config.ollama_host,
             config.modelo_embeddings_local,
-            timeout_s=_timeout_local(config),  # type: ignore[arg-type]
+            timeout_s=_timeout_local(config),
         )
     return OpenAIEmbeddings(
         cliente,
@@ -90,13 +90,15 @@ def criar_provedor_geracao(config: Configuracao, cliente: httpx.Client) -> Prove
             cliente,
             config.ollama_host,
             config.modelo_geracao_local,
-            timeout_s=_timeout_local(config),  # type: ignore[arg-type]
+            timeout_s=_timeout_local(config),
+            temperatura=config.temperatura_geracao,
         )
     return OpenAIGeracao(
         cliente,
         _chave_api(config),
         config.modelo_geracao_externo,
         timeout_s=config.timeout_geracao_s,
+        temperatura=config.temperatura_geracao,
     )
 
 
@@ -117,7 +119,7 @@ def criar_gerador_de_respostas(
     timeout: float | httpx.Timeout = (
         _timeout_local(config) if config.provedor_geracao == "local" else config.timeout_geracao_s
     )
-    return GeradorDeRespostas(provedor, timeout_s=timeout)  # type: ignore[arg-type]
+    return GeradorDeRespostas(provedor, timeout_s=timeout)
 
 
 def criar_componentes(

@@ -10,6 +10,7 @@ from pdf_rag_chatbot.geracao.prompt import (
     montar_prompt,
 )
 from pdf_rag_chatbot.modelos import Interacao, ResultadoBusca
+from pdf_rag_chatbot.tipos import TempoLimite
 
 LIMITE_CARACTERES = 2000
 TIMEOUT_PADRAO_S = 60.0
@@ -21,7 +22,7 @@ class ProvedorGeracao(Protocol):
 
     nome_modelo: str
 
-    def completar(self, mensagens: Sequence[Mensagem], timeout_s: float) -> str:
+    def completar(self, mensagens: Sequence[Mensagem], timeout_s: TempoLimite) -> str:
         """Devolve o texto da resposta ou lança `ErroProvedor`."""
         ...
 
@@ -46,7 +47,7 @@ class GeradorDeRespostas:
     LIMITE_CARACTERES = LIMITE_CARACTERES
     SENTINELA_SEM_RESPOSTA = SENTINELA_SEM_RESPOSTA
 
-    def __init__(self, provedor: ProvedorGeracao, timeout_s: float = TIMEOUT_PADRAO_S) -> None:
+    def __init__(self, provedor: ProvedorGeracao, timeout_s: TempoLimite = TIMEOUT_PADRAO_S) -> None:
         self._provedor = provedor
         self._timeout_s = timeout_s
 

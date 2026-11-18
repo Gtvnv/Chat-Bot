@@ -1,16 +1,23 @@
 """Índice vetorial em numpy, persistido em disco (Indice_Vetorial).
 
-Armazenamento em ``diretorio``:
+Armazenamento em ``diretorio`` (formato 2):
 
-- ``vectors.npy``: matriz ``float32`` ``(n, d)`` com vetores normalizados (norma 1).
-- ``chunks.json``: lista de Trechos na mesma ordem das linhas da matriz.
-- ``meta.json``: ``modelo_embeddings``, ``dimensao`` e ``versao_formato``.
+- ``atual.json``: manifesto ``{"versao": "<id>", "versao_formato": 2}``.
+- ``versoes/<id>/vectors.npy``: matriz ``float32`` ``(n, d)`` normalizada (norma 1).
+- ``versoes/<id>/chunks.json``: Trechos na mesma ordem das linhas da matriz.
+- ``versoes/<id>/meta.json``: ``modelo_embeddings``, ``dimensao`` e ``versao_formato``.
+
+A gravação cria uma versão nova e troca o manifesto com um único ``os.replace``.
+O formato 1 (três arquivos na raiz) ainda é lido e migrado na próxima gravação.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import shutil
+import uuid
+from datetime import datetime, timezone
 from collections.abc import Collection, Sequence
 from pathlib import Path
 from typing import Any
@@ -24,7 +31,10 @@ from pdf_rag_chatbot.erros import (
 )
 from pdf_rag_chatbot.modelos import ResultadoBusca, Trecho
 
-VERSAO_FORMATO = 1
+VERSAO_FORMATO = 2
+VERSAO_FORMATO_LEGADO = 1
+ARQUIVO_MANIFESTO = "atual.json"
+DIRETORIO_VERSOES = "versoes"
 ARQUIVO_VETORES = "vectors.npy"
 ARQUIVO_TRECHOS = "chunks.json"
 ARQUIVO_META = "meta.json"
@@ -69,20 +79,57 @@ class IndiceVetorial:
     # Carga
     # ------------------------------------------------------------------
     def carregar(self) -> None:
-        """Carrega o índice do disco. Diretório inexistente começa vazio."""
-        caminho_meta = self._diretorio / ARQUIVO_META
-        caminho_trechos = self._diretorio / ARQUIVO_TRECHOS
-        caminho_vetores = self._diretorio / ARQUIVO_VETORES
+        """Carrega o índice do disco. Diretório inexistente começa vazio.
 
+        Lê ``atual.json`` e a versão apontada (formato 2). Sem manifesto, aceita
+        os três arquivos na raiz (formato 1). Versões não referenciadas são
+        ignoradas.
+        """
+        vazio = np.empty((0, 0), dtype=np.float32)
         if not self._diretorio.exists():
-            self._definir_estado([], np.empty((0, 0), dtype=np.float32), None)
+            self._definir_estado([], vazio, None)
             return
 
-        existentes = [p.exists() for p in (caminho_meta, caminho_trechos, caminho_vetores)]
+        caminho_manifesto = self._diretorio / ARQUIVO_MANIFESTO
+        if caminho_manifesto.exists():
+            manifesto = self._ler_json(caminho_manifesto)
+            if not isinstance(manifesto, dict):
+                raise ErroIndiceCorrompido("atual.json inválido.")
+            versao = manifesto.get("versao")
+            if (
+                not isinstance(versao, str)
+                or not versao
+                or versao in (".", "..")
+                or "/" in versao
+                or "\\" in versao
+                or manifesto.get("versao_formato") != VERSAO_FORMATO
+            ):
+                raise ErroIndiceCorrompido("atual.json com campos ausentes ou inválidos.")
+            pasta = self._diretorio / DIRETORIO_VERSOES / versao
+            if not pasta.is_dir():
+                raise ErroIndiceCorrompido(
+                    "O manifesto aponta para uma versão inexistente do índice. "
+                    "Reindexe os PDFs."
+                )
+            self._carregar_pasta(pasta, VERSAO_FORMATO)
+            return
+
+        nomes = (ARQUIVO_META, ARQUIVO_TRECHOS, ARQUIVO_VETORES)
+        existentes = [(self._diretorio / n).exists() for n in nomes]
         if not any(existentes):
-            self._definir_estado([], np.empty((0, 0), dtype=np.float32), None)
+            self._definir_estado([], vazio, None)
             return
         if not all(existentes):
+            raise ErroIndiceCorrompido(
+                "Arquivos do índice incompletos. Reindexe os PDFs."
+            )
+        self._carregar_pasta(self._diretorio, VERSAO_FORMATO_LEGADO)
+
+    def _carregar_pasta(self, pasta: Path, versao_esperada: int) -> None:
+        caminho_meta = pasta / ARQUIVO_META
+        caminho_trechos = pasta / ARQUIVO_TRECHOS
+        caminho_vetores = pasta / ARQUIVO_VETORES
+        if not all(p.exists() for p in (caminho_meta, caminho_trechos, caminho_vetores)):
             raise ErroIndiceCorrompido(
                 "Arquivos do índice incompletos. Reindexe os PDFs."
             )
@@ -96,7 +143,7 @@ class IndiceVetorial:
             dimensao, bool
         ):
             raise ErroIndiceCorrompido("meta.json com campos ausentes ou inválidos.")
-        if meta.get("versao_formato") != VERSAO_FORMATO:
+        if meta.get("versao_formato") != versao_esperada:
             raise ErroIndiceCorrompido("Versão de formato do índice não suportada.")
         if modelo != self._nome_modelo:
             raise ErroIndiceIncompativel(
@@ -126,7 +173,6 @@ class IndiceVetorial:
             raise ErroIndiceCorrompido("vectors.npy contém valores não finitos.")
 
         self._definir_estado(trechos, vetores, dimensao)
-
     # ------------------------------------------------------------------
     # Escrita
     # ------------------------------------------------------------------
@@ -136,8 +182,8 @@ class IndiceVetorial:
         """Substitui todos os Trechos de ``fonte`` de forma tudo-ou-nada.
 
         Lista vazia de Trechos remove a fonte. O novo estado é montado por
-        completo, gravado em temporários no mesmo diretório e trocado com
-        ``os.replace``; a memória só é atualizada depois disso.
+        completo, gravado em uma versão nova e publicado com a troca
+        atômica do manifesto; a memória só é atualizada depois disso.
         """
         trechos = list(trechos)
         vetores = np.asarray(vetores, dtype=np.float32)
@@ -283,8 +329,7 @@ class IndiceVetorial:
     def _persistir(
         self, trechos: list[Trecho], vetores: np.ndarray, dimensao: int | None
     ) -> None:
-        """Grava temporários no mesmo diretório e troca com ``os.replace``."""
-        self._diretorio.mkdir(parents=True, exist_ok=True)
+        """Grava uma versão nova e publica com um único ``os.replace`` do manifesto."""
         if dimensao is None:
             dimensao = vetores.shape[1]
         if vetores.shape[0] == 0:
@@ -306,16 +351,18 @@ class IndiceVetorial:
             ensure_ascii=False,
         )
 
-        destinos = {
-            ARQUIVO_VETORES: self._diretorio / ARQUIVO_VETORES,
-            ARQUIVO_TRECHOS: self._diretorio / ARQUIVO_TRECHOS,
-            ARQUIVO_META: self._diretorio / ARQUIVO_META,
-        }
-        temporarios = {
-            nome: self._diretorio / f"{nome}.{os.getpid()}.tmp" for nome in destinos
-        }
+        agora = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        versao = f"{agora}-{uuid.uuid4().hex[:8]}"
+        raiz_versoes = self._diretorio / DIRETORIO_VERSOES
+        pasta = raiz_versoes / versao
+        manifesto = self._diretorio / ARQUIVO_MANIFESTO
+        manifesto_tmp = self._diretorio / f"{ARQUIVO_MANIFESTO}.{os.getpid()}.tmp"
+        versoes_existiam = raiz_versoes.exists()
+        diretorio_existia = self._diretorio.exists()
+
         try:
-            with open(temporarios[ARQUIVO_VETORES], "wb") as f:
+            pasta.mkdir(parents=True)
+            with open(pasta / ARQUIVO_VETORES, "wb") as f:
                 np.save(f, vetores.astype(np.float32), allow_pickle=False)
                 f.flush()
                 os.fsync(f.fileno())
@@ -323,16 +370,66 @@ class IndiceVetorial:
                 (ARQUIVO_TRECHOS, conteudo_trechos),
                 (ARQUIVO_META, conteudo_meta),
             ):
-                with open(temporarios[nome], "w", encoding="utf-8") as f:
+                with open(pasta / nome, "w", encoding="utf-8") as f:
                     f.write(conteudo)
                     f.flush()
                     os.fsync(f.fileno())
-            # Todos os temporários estão completos; só então troca os finais.
-            for nome in (ARQUIVO_VETORES, ARQUIVO_TRECHOS, ARQUIVO_META):
-                os.replace(temporarios[nome], destinos[nome])
+            self._sincronizar_diretorio(pasta)
+
+            with open(manifesto_tmp, "w", encoding="utf-8") as f:
+                json.dump({"versao": versao, "versao_formato": VERSAO_FORMATO}, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(manifesto_tmp, manifesto)
+        except BaseException:
+            # Falha antes da troca do manifesto: o estado anterior segue intacto.
+            try:
+                manifesto_tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            shutil.rmtree(pasta, ignore_errors=True)
+            if not versoes_existiam:
+                self._remover_se_vazio(raiz_versoes)
+            if not diretorio_existia:
+                self._remover_se_vazio(self._diretorio)
+            raise
+
+        self._sincronizar_diretorio(self._diretorio)
+        self._limpar_versoes_antigas(versao)
+
+    def _limpar_versoes_antigas(self, versao_atual: str) -> None:
+        """Remove versões não atuais e arquivos do formato 1; ignora falhas."""
+        try:
+            for item in (self._diretorio / DIRETORIO_VERSOES).iterdir():
+                if item.name != versao_atual:
+                    shutil.rmtree(item, ignore_errors=True)
+        except OSError:
+            pass
+        for nome in (ARQUIVO_VETORES, ARQUIVO_TRECHOS, ARQUIVO_META):
+            try:
+                (self._diretorio / nome).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    @staticmethod
+    def _remover_se_vazio(caminho: Path) -> None:
+        try:
+            caminho.rmdir()
+        except OSError:
+            pass
+
+    @staticmethod
+    def _sincronizar_diretorio(caminho: Path) -> None:
+        """``fsync`` do diretório onde o sistema permite (POSIX); no Windows é ignorado."""
+        if os.name == "nt":
+            return
+        try:
+            fd = os.open(caminho, os.O_RDONLY)
+        except OSError:
+            return
+        try:
+            os.fsync(fd)
+        except OSError:
+            pass
         finally:
-            for tmp in temporarios.values():
-                try:
-                    tmp.unlink(missing_ok=True)
-                except OSError:
-                    pass
+            os.close(fd)

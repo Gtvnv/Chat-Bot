@@ -1,13 +1,14 @@
 # Modo local gratuito: Ollama + chatbot, sem envio de dados a terceiros.
+# Os modelos são baixados automaticamente pelo serviço ollama-init; o chatbot
+# só inicia depois que o download termina com sucesso.
 # Uso:
-#   docker compose up -d ollama
-#   docker compose exec ollama ollama pull nomic-embed-text
-#   docker compose exec ollama ollama pull llama3.2
 #   docker compose run --rm chatbot carregar inputs
 #   docker compose run --rm chatbot
+# Em máquinas sem GPU, use um modelo de geração menor:
+#   MODELO_GERACAO_LOCAL=llama3.2:1b docker compose run --rm chatbot
 services:
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.40.16
     ports:
       - "11434:11434"
     volumes:
@@ -18,11 +19,29 @@ services:
       timeout: 5s
       retries: 10
 
-  chatbot:
-    build: .
+  ollama-init:
+    image: ollama/ollama:0.40.16
     depends_on:
       ollama:
         condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        for modelo in "${MODELO_EMBEDDINGS_LOCAL:-nomic-embed-text}" "${MODELO_GERACAO_LOCAL:-llama3.2}"; do
+          if ! ollama pull "$$modelo"; then
+            echo "Falha ao baixar o modelo $$modelo"
+            exit 1
+          fi
+        done
+
+  chatbot:
+    build: .
+    depends_on:
+      ollama-init:
+        condition: service_completed_successfully
     environment:
       PROVEDOR_EMBEDDINGS: ${PROVEDOR_EMBEDDINGS:-local}
       PROVEDOR_GERACAO: ${PROVEDOR_GERACAO:-local}
@@ -30,6 +49,8 @@ services:
       MODELO_EMBEDDINGS_LOCAL: ${MODELO_EMBEDDINGS_LOCAL:-nomic-embed-text}
       MODELO_GERACAO_LOCAL: ${MODELO_GERACAO_LOCAL:-llama3.2}
       TOP_K: ${TOP_K:-4}
+      TIMEOUT_GERACAO_S: ${TIMEOUT_GERACAO_S:-60}
+      TEMPERATURA_GERACAO: ${TEMPERATURA_GERACAO:-0.2}
       DIRETORIO_INDICE: /app/data/index
     volumes:
       - indice:/app/data

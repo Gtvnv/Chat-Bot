@@ -119,7 +119,7 @@ sequenceDiagram
 - **Citações por marcadores `[n]`**: cada Trecho recuperado entra no prompt numerado (`[1]`, `[2]`, ...). O modelo é instruído a marcar as afirmações com esses números. O `Chatbot` converte os marcadores em Citações, descarta números que não existem e remove repetições. Assim, a lista de Citações contém apenas Trechos efetivamente usados (Requisito 3.3) e nunca arquivos inventados pelo modelo.
 - **Resposta sem informação**: o prompt instrui o modelo a responder exatamente com o sentinela `SEM_RESPOSTA` quando os Trechos não bastam. O `Chatbot` troca o sentinela pela mensagem "não encontrada nos documentos carregados" e não exibe Citações (Requisito 3.4).
 - **Chunking por página**: o texto é dividido página a página, então nenhum Trecho cruza páginas e a página de origem é exata (Requisito 1.4). A divisão usa janelas fixas de caracteres, o que torna o tamanho e a sobreposição verificáveis por propriedade.
-- **Substituição atômica por arquivo**: `substituir_fonte` calcula o novo estado completo, grava em arquivos temporários e só então troca os arquivos finais (`os.replace`) e o estado em memória. Se qualquer passo falha, o estado anterior permanece (Requisitos 1.9 e 1.10). Os embeddings são gerados antes de tocar no índice.
+- **Substituição atômica por arquivo**: `substituir_fonte` calcula o novo estado completo, grava uma nova versão completa em um subdiretório próprio e só então troca o manifesto `atual.json` com um único `os.replace` e atualiza o estado em memória (detalhes na seção Revisão 2). Se qualquer passo falha, o estado anterior permanece (Requisitos 1.9 e 1.10). Os embeddings são gerados antes de tocar no índice.
 - **Compatibilidade do modelo de embedding**: `meta.json` guarda o nome do modelo e a dimensão. Se a configuração atual usa outro modelo, o índice recusa consultas e novas inserções com erro orientando a reindexar. Isso garante que Trechos e perguntas usem o mesmo modelo (Requisitos 2.1 e 2.4).
 - **Sem fallback entre provedores**: se o provedor local falha, a inicialização termina. O sistema nunca troca para o externo sozinho (Requisito 5.7).
 - **Estado de falha sem retenção**: o `Chatbot` mantém Trechos e Citações apenas em variáveis locais da chamada de `responder`. Em falha, a exceção descarta tudo e uma nova tentativa refaz a recuperação (Requisitos 3.8 e 3.9).
@@ -174,7 +174,8 @@ class Configuracao:
     modelo_embeddings_externo: str = "text-embedding-3-small"
     modelo_geracao_externo: str = "gpt-4o-mini"
     chave_api: str | None = None        # nunca é impressa nem logada
-    timeout_geracao_s: float = 60.0
+    timeout_geracao_s: int = 60         # TIMEOUT_GERACAO_S, inteiro de 10 a 600 (Req. 3.10)
+    temperatura_geracao: float = 0.2    # TEMPERATURA_GERACAO, de 0 a 1 (Req. 3.13)
     timeout_conexao_local_s: float = 10.0
 
 def carregar_configuracao(env: Mapping[str, str] | None = None,
@@ -286,7 +287,7 @@ Armazenamento em `diretorio_indice`:
 - `meta.json`: `{modelo_embeddings, dimensao, versao_formato}`.
 
 Operações:
-- `substituir_fonte`: remove as linhas de `fonte`, acrescenta as novas, normaliza, grava os três arquivos em temporários no mesmo diretório e troca com `os.replace`. Só depois atualiza o estado em memória. A gravação é síncrona, então ocorre bem antes do limite de 5 segundos (Requisito 2.3). Com `trechos` vazio a operação remove a fonte.
+- `substituir_fonte`: remove as linhas de `fonte`, acrescenta as novas, normaliza, grava os três arquivos em um novo subdiretório de versão e troca o manifesto com um único `os.replace` (Revisão 2, Requisito 2.14). Só depois atualiza o estado em memória. A gravação é síncrona, então ocorre bem antes do limite de 5 segundos (Requisito 2.3). Com `trechos` vazio a operação remove a fonte.
 - `buscar`: normaliza `vetor`, calcula `matriz @ vetor`, escolhe os `min(k, n)` maiores com `np.argpartition` e ordena de forma decrescente; desempata por posição de inserção para ordem determinística. O parâmetro opcional `fontes` restringe a busca a arquivos específicos (usado nas perguntas comparativas).
 - `carregar`: lê os três arquivos; se `meta.json` indica modelo diferente de `nome_modelo`, lança `ErroIndiceIncompativel` pedindo reindexação. Se o diretório não existe, o índice começa vazio.
 - Arquivos corrompidos ou inconsistentes (número de linhas diferente do número de Trechos) lançam `ErroIndiceCorrompido`.
@@ -303,7 +304,7 @@ class Recuperador:
 ```
 
 - `recuperar` gera o embedding da pergunta com o mesmo `GeradorDeEmbeddings` usado na indexação e chama `indice.buscar(vetor, top_k)`.
-- Pergunta comparativa: `fontes_mencionadas(pergunta, fontes_do_indice)` devolve os arquivos do índice cujo nome (com ou sem extensão, sem diferenciar maiúsculas de minúsculas) aparece na pergunta. Se há 2 ou mais, o `Recuperador` busca os `top_k` Trechos de cada arquivo mencionado (`fontes=[f]`), junta os resultados, ordena por similaridade e garante pelo menos 1 Trecho por arquivo mencionado (Requisito 3.5). O total pode passar de `top_k`, mas não passa de 10 por pergunta (limite do Requisito 3.1), então com muitos arquivos mencionados o número por arquivo é `max(1, 10 // n_arquivos)`.
+- Pergunta comparativa: `fontes_mencionadas(pergunta, fontes_do_indice)` devolve os arquivos do índice cujo nome (com ou sem extensão, sem diferenciar maiúsculas de minúsculas) aparece na pergunta como termo isolado, ou seja, sem letra, dígito ou sublinhado imediatamente antes ou depois. Se há 2 ou mais, o `Recuperador` busca os `top_k` Trechos de cada arquivo mencionado (`fontes=[f]`), junta os resultados, ordena por similaridade e garante pelo menos 1 Trecho por arquivo mencionado (Requisito 3.5). O total pode passar de `top_k`, mas não passa de 10 por pergunta (limite do Requisito 3.1), então com muitos arquivos mencionados o número por arquivo é `max(1, 10 // n_arquivos)`.
 - Falha no embedding da pergunta lança `ErroEmbeddings` sem alterar o índice (Requisito 2.9).
 
 ### Gerador_de_Respostas (`geracao/`)
@@ -326,7 +327,7 @@ class GeradorDeRespostas:
   - Mensagens do histórico (as 5 últimas interações, cronológicas).
   - Mensagem final com os Trechos numerados `[n] (arquivo, p. N): texto` e a pergunta.
 - `gerar` chama `provedor.completar`, aplica `limitar_resposta(texto, 2000)` (corta no último espaço antes do limite quando houver, sem passar de 2.000 caracteres) e devolve o texto.
-- O timeout de 60 s é passado ao `httpx` e qualquer `httpx.TimeoutException`, erro HTTP ou resposta malformada vira `ErroProvedor`. Resposta parcial nunca é devolvida.
+- O Tempo_Limite_de_Geracao (padrão 60 s, configurável por `TIMEOUT_GERACAO_S`) é passado ao `httpx` e qualquer `httpx.TimeoutException`, erro HTTP ou resposta malformada vira `ErroProvedor`. Resposta parcial nunca é devolvida.
 - `OllamaGeracao`: `POST {host}/api/chat` com `stream: false`. `OpenAIGeracao`: `POST /v1/chat/completions`. Resposta 401 ou 403 do provedor externo vira `ErroChaveApi` (Requisito 6.4).
 
 ### Citações (`citacoes.py`)
@@ -613,6 +614,30 @@ Reflexão sobre redundância: as propriedades de tamanho, sobreposição e recon
 
 **Validates: Requirements 7.4, 7.5**
 
+### Property 28: Tempo limite e temperatura de geração são validados
+
+*Para qualquer* valor de `TIMEOUT_GERACAO_S` e de `TEMPERATURA_GERACAO` (ausente, vazio, inteiro, decimal ou texto), a configuração é aceita se e somente se o tempo limite é um inteiro entre 10 e 600 (ou ausente, valendo 60) e a temperatura é um número entre 0 e 1 (ou ausente, valendo 0,2); valores aceitos chegam ao provedor (timeout repassado ao `httpx` e temperatura no corpo da requisição); valores rejeitados geram `ErroConfiguracao` com o nome da variável e a faixa, sem nenhuma requisição de rede.
+
+**Validates: Requirements 3.10, 3.11, 3.13, 3.14**
+
+### Property 29: Resposta só com marcadores é não fundamentada
+
+*Para qualquer* resposta do modelo composta apenas por marcadores `[n]` (válidos ou não), pontuação e espaços em branco, o `Chatbot` devolve a mensagem de resposta não fundamentada, sem Citações e sem exibir o texto do modelo; respostas com ao menos uma letra ou dígito fora dos marcadores e com Citação válida continuam sendo exibidas.
+
+**Validates: Requirements 3.12, 3.7**
+
+### Property 30: Menção de arquivo exige termo isolado
+
+*Para qualquer* nome de arquivo do índice e qualquer pergunta, `fontes_mencionadas` inclui o arquivo se e somente se o nome, com ou sem extensão e sem diferenciar maiúsculas de minúsculas, aparece na pergunta sem letra, dígito ou sublinhado imediatamente antes ou depois.
+
+**Validates: Requirements 3.5**
+
+### Property 31: Gravação interrompida do índice preserva um estado completo
+
+*Para qualquer* índice com estado anterior e qualquer ponto de interrupção na gravação de um novo estado (falha em qualquer escrita de arquivo, em qualquer `fsync` ou na troca do manifesto), uma nova instância que carrega o diretório obtém exatamente o estado anterior completo ou o novo estado completo, nunca uma combinação, e versões órfãs não aparecem no índice carregado.
+
+**Validates: Requirements 2.14, 1.10**
+
 ## Error Handling
 
 | Situação | Exceção | Comportamento observável |
@@ -632,7 +657,9 @@ Reflexão sobre redundância: as propriedades de tamanho, sobreposição e recon
 | Pergunta vazia ou acima de 2.000 caracteres | `ErroPergunta` | Mensagem específica; sem recuperação e sem histórico |
 | Índice vazio | tratado sem exceção | Mensagem de orientação para carregar PDFs; sem chamadas ao Recuperador ou modelo |
 | Falha ao gerar embedding da pergunta | `ErroEmbeddings` | "A busca não pôde ser realizada"; índice inalterado |
-| Falha, erro ou timeout (60 s) do provedor de geração | `ErroProvedor` | Mensagem de falha de comunicação; sem resposta parcial ou Citações; histórico preservado |
+| `TIMEOUT_GERACAO_S` fora de 10 a 600 ou `TEMPERATURA_GERACAO` fora de 0 a 1 | `ErroConfiguracao` | Mensagem com nome da variável e faixa; código de saída 1; 0 requisições |
+| Resposta só com marcadores, pontuação ou espaços | tratado sem exceção | Mensagem de resposta não fundamentada, sem Citações |
+| Falha, erro ou timeout (Tempo_Limite_de_Geracao) do provedor de geração | `ErroProvedor` | Mensagem de falha de comunicação; sem resposta parcial ou Citações; histórico preservado |
 | Índice com outro modelo de embedding | `ErroIndiceIncompativel` | Mensagem orientando a reindexar; índice não é modificado |
 | Arquivos do índice corrompidos | `ErroIndiceCorrompido` | Mensagem orientando a apagar o diretório do índice e reindexar |
 | Resposta sem Citação válida | tratado sem exceção | Mensagem de resposta não fundamentada |
@@ -641,7 +668,7 @@ Princípios:
 - Nenhum erro de consulta ou de provedor encerra a sessão; só erros de inicialização terminam o processo.
 - Mensagens de erro nunca incluem o valor da chave de API; elas citam o nome da variável.
 - O laço da CLI captura `ErroChatbot` e exibe a mensagem. Exceções inesperadas são registradas no log (com filtro de segredos) e exibidas como erro genérico, mantendo a sessão ativa.
-- Falhas de gravação do índice não corrompem o estado: a troca de arquivos só acontece depois que todos os temporários foram gravados.
+- Falhas de gravação do índice não corrompem o estado: a nova versão só passa a valer quando o manifesto é trocado, em uma única operação atômica.
 
 ## Testing Strategy
 
@@ -695,3 +722,70 @@ Cada uma das funções de divisão de Trechos (`dividir_em_trechos`), recuperaç
 - Requisito 9.1 (repositório Git novo, sem histórico herdado) e a verificação do termo proibido nas mensagens de commit são feitas na criação do repositório e conferidas por `git log` antes da publicação.
 - Os prints de tela do Readme (Requisito 8.4) são capturados com uma execução real, usando o provedor local.
 - Requisitos 8.1 a 8.9: o teste de entrega valida estrutura e contagens; o conteúdo qualitativo (insights, limitações) é revisado pelo autor.
+
+## Revisão 2: melhorias pós-entrega
+
+Melhorias identificadas ao executar o projeto em Docker, em CPU, e ao revisar o código entregue.
+
+### Tempo limite e temperatura configuráveis (Req. 3.10 a 3.14)
+
+- `config.py` lê `TIMEOUT_GERACAO_S` (inteiro de 10 a 600, padrão 60) e `TEMPERATURA_GERACAO` (número de 0 a 1, padrão 0,2) com as funções `validar_timeout_geracao` e `validar_temperatura`, que lançam `ErroConfiguracao` com o nome da variável e a faixa. Os dois valores entram em `.env.example`.
+- A `fabrica.py` repassa o tempo limite aos provedores de geração (local e externo) e a temperatura aos construtores de `OllamaGeracao` e `OpenAIGeracao`.
+- `OllamaGeracao` envia `"options": {"temperature": t}`; `OpenAIGeracao` envia `"temperature": t`. Temperatura baixa deixa a resposta mais presa aos Trechos e mais reproduzível entre execuções.
+- Motivação: em CPU sem GPU, o `llama3.2` leva cerca de 160 s para um prompt de RAG, acima do limite fixo anterior de 60 s.
+
+### Tipagem do tempo limite (melhoria interna)
+
+- Um alias `TempoLimite = float | httpx.Timeout`, definido em `pdf_rag_chatbot/tipos.py`, passa a ser o tipo do parâmetro `timeout_s` dos provedores de embeddings e de geração, do `Protocol` `ProvedorGeracao` e do `GeradorDeRespostas`. Isso remove os `# type: ignore[arg-type]` da `fabrica.py`, que passa `httpx.Timeout(leitura, connect=10)` aos provedores locais.
+
+### Resposta só com marcadores (Req. 3.12)
+
+- `chatbot.py` ganha `tem_conteudo(texto) -> bool`: remove os marcadores `\[\d+\]`, pontuação e espaços e verifica se resta alguma letra ou dígito. O passo de "resposta sem Citação" do algoritmo de `responder` passa a ser "resposta sem conteúdo ou sem Citação", com a mesma mensagem `NAO_FUNDAMENTADA`. A verificação vale também para a resposta do reforço comparativo.
+
+### Menção de arquivo como termo isolado (Req. 3.5)
+
+- `fontes_mencionadas` usa, para cada nome (com e sem extensão), a expressão `(?<![\w])` + `re.escape(nome)` + `(?![\w])` com `re.IGNORECASE`. Em Python, `\w` cobre letras Unicode, dígitos e sublinhado, o que corresponde ao critério do requisito. Assim `c.pdf` não é detectado em "compare" e `a.pdf` não é detectado em "relatorio_a.pdf".
+
+### Persistência atômica do índice com manifesto (Req. 2.14)
+
+Novo layout em `diretorio` (`versao_formato` 2):
+
+```
+data/index/
+  atual.json              {"versao": "<id>", "versao_formato": 2}
+  versoes/<id>/vectors.npy
+  versoes/<id>/chunks.json
+  versoes/<id>/meta.json
+```
+
+- `substituir_fonte` cria `versoes/<id-novo>/` (id com data e hora e sufixo aleatório), grava e faz `fsync` dos três arquivos, grava `atual.json.tmp`, faz `fsync` e troca com um único `os.replace` para `atual.json`. Só depois atualiza a memória e apaga, de forma tolerante a falhas, as versões que não são a atual.
+- `carregar` lê `atual.json` e a versão apontada. Subdiretórios não referenciados são ignorados. Se `atual.json` não existe mas os três arquivos do formato 1 estão na raiz, o índice é carregado desse formato antigo; a próxima gravação cria o formato 2 e remove os arquivos antigos depois da troca do manifesto.
+- Manifesto apontando para versão inexistente ou inconsistente lança `ErroIndiceCorrompido`.
+- Qualquer falha antes do `os.replace` do manifesto deixa o manifesto antigo intacto; a falha depois dele só afeta a limpeza, que é refeita na gravação seguinte.
+
+### Contêineres (Req. 10)
+
+- `docker-compose.yml` com três serviços:
+  - `ollama`: imagem `ollama/ollama:0.40.16` (versão fixada), volume `ollama-modelos` e healthcheck `ollama list`.
+  - `ollama-init`: mesma imagem, `OLLAMA_HOST=http://ollama:11434`, depende de `ollama` saudável e executa `ollama pull` para `MODELO_EMBEDDINGS_LOCAL` e `MODELO_GERACAO_LOCAL`. Em falha, imprime `Falha ao baixar o modelo <nome>` e termina com código 1.
+  - `chatbot`: construído pelo `Dockerfile`, depende de `ollama-init` com `condition: service_completed_successfully`, volume `indice` em `/app/data` e repasse de `MODELO_*`, `TOP_K`, `TIMEOUT_GERACAO_S` e `TEMPERATURA_GERACAO`.
+- `Dockerfile` em `python:3.12-slim`, usuário sem privilégios `chatbot`. `.dockerignore` exclui `.env`, `data`, `.venv`, `venv`, `.git`, testes e documentação.
+- `scripts/capturar_evidencias.py` grava transcrições reais de sessões em `docs/evidencias/`, e `scripts/renderizar_evidencias.py` (Pillow, dependência de desenvolvimento) as converte nas imagens de `docs/img/`.
+
+### Integração contínua (Req. 9.8, 9.9)
+
+- `.github/workflows/testes.yml`: dispara em `push` e `pull_request` para `main`; matriz com Python 3.11 e 3.12 em `ubuntu-latest`; instala `requirements-dev.txt` e o pacote (`pip install -e .`) e executa `pytest`. O passo falha quando algum teste falha, o que marca a execução como reprovada.
+- O Readme exibe o badge `https://github.com/Gtvnv/Chat-Bot/actions/workflows/testes.yml/badge.svg`.
+- `.gitattributes` marca `*.pdf`, `*.png` e `*.npy` como binários e normaliza fim de linha LF, para que o checkout no CI e no Windows não altere os PDFs de exemplo.
+
+### Testes da Revisão 2
+
+| Arquivo | Cobertura |
+|---|---|
+| `test_config_propriedades.py` | Property 28 (validação e valores padrão) |
+| `test_geracao_provedores.py` | Temperatura no corpo das requisições do Ollama e da OpenAI; tempo limite configurado repassado ao `httpx` |
+| `test_chatbot_propriedades.py` | Property 29 |
+| `test_recuperador_propriedades.py` | Property 30 |
+| `test_indice_propriedades.py` | Property 31 (falhas injetadas em escrita, `fsync` e `os.replace`) |
+| `test_indice.py` | Carga do formato 1 e migração para o formato 2; manifesto para versão inexistente; versão órfã ignorada |
+| `test_entrega.py` | `Dockerfile` com usuário sem privilégios; compose com imagem fixada, serviço de download dos modelos e dependência `service_completed_successfully`; `.dockerignore`; workflow de CI; badge no Readme; `.gitattributes` |

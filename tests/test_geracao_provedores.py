@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 
+from pdf_rag_chatbot import fabrica
+from pdf_rag_chatbot.config import carregar_configuracao
 from pdf_rag_chatbot.erros import ErroChaveApi, ErroProvedor
 from pdf_rag_chatbot.geracao import ProvedorGeracao
 from pdf_rag_chatbot.geracao.ollama import OllamaGeracao
@@ -162,3 +166,101 @@ def test_ollama_401_403_viram_erro_provedor(status: int) -> None:
     erro = _falha_sem_texto(_ollama, lambda r: httpx.Response(status), ErroProvedor)
     assert not isinstance(erro, ErroChaveApi)
     assert str(status) in str(erro)
+
+
+# --- Temperatura e tempo limite (Requisitos 3.6, 3.10, 3.13) ---------------------------
+
+
+def _capturar(corpo_resposta: dict, requisicoes: list[httpx.Request]):
+    def handler(req: httpx.Request) -> httpx.Response:
+        requisicoes.append(req)
+        return httpx.Response(200, json=corpo_resposta)
+
+    return handler
+
+
+RESPOSTA_OLLAMA = {"message": {"role": "assistant", "content": "ok"}}
+RESPOSTA_OPENAI = {"choices": [{"message": {"content": "ok"}}]}
+
+
+def test_ollama_envia_temperatura_explicita_e_stream_false() -> None:
+    vistas: list[httpx.Request] = []
+    provedor = OllamaGeracao(
+        _cliente(_capturar(RESPOSTA_OLLAMA, vistas)),
+        "http://localhost:11434",
+        "llama3.2",
+        temperatura=0.7,
+    )
+    provedor.completar(MENSAGENS, 60.0)
+    corpo = json.loads(vistas[0].content)
+    assert corpo["options"]["temperature"] == 0.7
+    assert corpo["stream"] is False
+
+
+def test_openai_envia_temperatura_explicita() -> None:
+    vistas: list[httpx.Request] = []
+    provedor = OpenAIGeracao(
+        _cliente(_capturar(RESPOSTA_OPENAI, vistas)), CHAVE, "gpt-4o-mini", temperatura=0.7
+    )
+    provedor.completar(MENSAGENS, 60.0)
+    assert json.loads(vistas[0].content)["temperature"] == 0.7
+
+
+def test_construtores_sem_temperatura_usam_padrao_0_2() -> None:
+    o: list[httpx.Request] = []
+    a: list[httpx.Request] = []
+    OllamaGeracao(
+        _cliente(_capturar(RESPOSTA_OLLAMA, o)), "http://localhost:11434", "llama3.2"
+    ).completar(MENSAGENS, 60.0)
+    _openai(_capturar(RESPOSTA_OPENAI, a)).completar(MENSAGENS, 60.0)
+    assert json.loads(o[0].content)["options"]["temperature"] == 0.2
+    assert json.loads(a[0].content)["temperature"] == 0.2
+
+
+def test_timeout_numerico_repassa_read_120() -> None:
+    capturado: list[dict] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        capturado.append(req.extensions["timeout"])
+        return httpx.Response(200, json=RESPOSTA_OLLAMA)
+
+    _ollama(handler).completar(MENSAGENS, 120)
+    assert capturado[0]["read"] == 120
+
+
+def test_timeout_httpx_repassa_read_e_connect() -> None:
+    capturado: list[dict] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        capturado.append(req.extensions["timeout"])
+        return httpx.Response(200, json=RESPOSTA_OLLAMA)
+
+    _ollama(handler).completar(MENSAGENS, httpx.Timeout(300, connect=10))
+    assert capturado[0]["read"] == 300
+    assert capturado[0]["connect"] == 10
+
+
+def _gerar_pela_fabrica(env: dict[str, str]) -> tuple[dict, dict]:
+    capturado: list[httpx.Request] = []
+    config = carregar_configuracao(env=env, arquivo_env=None)
+    gerador = fabrica.criar_gerador_de_respostas(
+        config, _cliente(_capturar(RESPOSTA_OLLAMA, capturado))
+    )
+    gerador.gerar("Pergunta?", [], [])
+    return json.loads(capturado[0].content), capturado[0].extensions["timeout"]
+
+
+_ENV_LOCAL = {"PROVEDOR_EMBEDDINGS": "local", "PROVEDOR_GERACAO": "local"}
+
+
+def test_fabrica_sem_variaveis_usa_temperatura_0_2_e_timeout_60() -> None:
+    corpo, timeout = _gerar_pela_fabrica(dict(_ENV_LOCAL))
+    assert corpo["options"]["temperature"] == 0.2
+    assert timeout["read"] == 60
+
+
+def test_fabrica_com_variaveis_repassa_temperatura_e_timeout() -> None:
+    env = {**_ENV_LOCAL, "TIMEOUT_GERACAO_S": "300", "TEMPERATURA_GERACAO": "0,5"}
+    corpo, timeout = _gerar_pela_fabrica(env)
+    assert corpo["options"]["temperature"] == 0.5
+    assert timeout["read"] == 300

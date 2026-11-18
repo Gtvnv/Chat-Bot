@@ -7,8 +7,9 @@ from typing import Sequence
 import httpx
 
 from pdf_rag_chatbot.erros import ErroChaveApi, ErroProvedor
-from pdf_rag_chatbot.geracao.ollama import TIMEOUT_PADRAO_S
+from pdf_rag_chatbot.geracao.ollama import TEMPERATURA_PADRAO, TIMEOUT_PADRAO_S
 from pdf_rag_chatbot.geracao.prompt import Mensagem
+from pdf_rag_chatbot.tipos import TempoLimite
 
 URL_CHAT = "https://api.openai.com/v1/chat/completions"
 NOME_VARIAVEL_CHAVE = "OPENAI_API_KEY"
@@ -22,18 +23,20 @@ class OpenAIGeracao:
         cliente: httpx.Client,
         chave_api: str,
         nome_modelo: str,
-        timeout_s: float = TIMEOUT_PADRAO_S,
+        timeout_s: TempoLimite = TIMEOUT_PADRAO_S,
+        temperatura: float = TEMPERATURA_PADRAO,
     ) -> None:
         self._cliente = cliente
         self._chave_api = chave_api
         self.nome_modelo = nome_modelo
         self._timeout_s = timeout_s
+        self._temperatura = temperatura
 
     def __repr__(self) -> str:
         return f"OpenAIGeracao(nome_modelo={self.nome_modelo!r})"
 
     def completar(
-        self, mensagens: Sequence[Mensagem], timeout_s: float | None = None
+        self, mensagens: Sequence[Mensagem], timeout_s: TempoLimite | None = None
     ) -> str:
         timeout = self._timeout_s if timeout_s is None else timeout_s
         try:
@@ -43,6 +46,7 @@ class OpenAIGeracao:
                 json={
                     "model": self.nome_modelo,
                     "messages": [dict(m) for m in mensagens],
+                    "temperature": self._temperatura,
                 },
                 timeout=timeout,
             )
