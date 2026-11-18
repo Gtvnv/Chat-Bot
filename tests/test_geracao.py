@@ -10,7 +10,7 @@ from pdf_rag_chatbot.geracao.prompt import (
     montar_prompt,
 )
 from pdf_rag_chatbot.modelos import Interacao, ResultadoBusca, Trecho
-from tests.dobles import GeracaoFalsa
+from dobles import GeracaoFalsa
 
 
 def _resultado(texto: str = "conteudo", fonte: str = "a.pdf", pagina: int = 1) -> ResultadoBusca:

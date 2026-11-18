@@ -7,7 +7,7 @@ from hypothesis import strategies as st
 
 from pdf_rag_chatbot.geracao.base import GeradorDeRespostas
 from pdf_rag_chatbot.modelos import ResultadoBusca, Trecho
-from tests.dobles import GeracaoFalsa
+from dobles import GeracaoFalsa
 
 
 @st.composite

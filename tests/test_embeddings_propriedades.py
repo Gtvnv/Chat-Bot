@@ -11,7 +11,7 @@ from hypothesis import strategies as st
 from pdf_rag_chatbot.embeddings.base import GeradorDeEmbeddings
 from pdf_rag_chatbot.erros import ErroEmbeddings
 
-from tests.dobles import EmbeddingsFalso
+from dobles import EmbeddingsFalso
 
 
 class _ProvedorInconsistente:
