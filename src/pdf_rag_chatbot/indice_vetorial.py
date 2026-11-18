@@ -394,8 +394,18 @@ class IndiceVetorial:
                 self._remover_se_vazio(self._diretorio)
             raise
 
-        self._sincronizar_diretorio(self._diretorio)
-        self._limpar_versoes_antigas(versao)
+        # Depois da troca do manifesto a gravação já está confirmada em disco. O que
+        # vem a seguir é só durabilidade extra e limpeza: nenhuma falha aqui pode
+        # escapar, senão a memória ficaria diferente do disco. A limpeza que não
+        # acontecer agora é refeita na próxima gravação.
+        try:
+            self._sincronizar_diretorio(self._diretorio)
+        except Exception:  # noqa: BLE001 - etapa opcional após a confirmação
+            pass
+        try:
+            self._limpar_versoes_antigas(versao)
+        except Exception:  # noqa: BLE001 - limpeza refeita na próxima gravação
+            pass
 
     def _limpar_versoes_antigas(self, versao_atual: str) -> None:
         """Remove versões não atuais e arquivos do formato 1; ignora falhas."""

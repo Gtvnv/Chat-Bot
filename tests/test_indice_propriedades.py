@@ -194,6 +194,10 @@ def _estado(indice: IndiceVetorial):
     return list(indice._trechos), np.array(indice._vetores, copy=True)
 
 
+def _estados_iguais(a, b) -> bool:
+    return a[0] == b[0] and a[1].shape == b[1].shape and np.allclose(a[1], b[1], rtol=0, atol=1e-6)
+
+
 def _assert_estado_igual(a, b) -> None:
     assert a[0] == b[0]
     assert a[1].shape == b[1].shape
@@ -286,8 +290,14 @@ def test_gravacao_interrompida_preserva_estado_completo(dados) -> None:
         carregado.carregar()
         em_disco = _estado(carregado)
 
-        # Disco: exatamente o estado anterior (se falhou) ou o novo (se concluiu).
-        _assert_estado_igual(em_disco, estado_anterior if falhou else estado_novo)
+        # Disco: exatamente o estado anterior completo ou o novo completo, nunca misto.
+        # Uma falha depois da troca do manifesto (por exemplo, no fsync do diretório,
+        # que só existe em POSIX) acontece com a gravação já confirmada, então o
+        # estado novo também é válido nesse caso.
+        if falhou:
+            assert _estados_iguais(em_disco, estado_anterior) or _estados_iguais(em_disco, estado_novo)
+        else:
+            _assert_estado_igual(em_disco, estado_novo)
 
         # Memória da instância original coerente com o disco.
         _assert_estado_igual(_estado(indice), em_disco)
