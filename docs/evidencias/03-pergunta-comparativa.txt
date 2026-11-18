@@ -1,0 +1,9 @@
+$ python -m pdf_rag_chatbot
+PDF RAG Chatbot. Comandos: carregar <caminhos>, documentos, topk <n>, sair. Qualquer outra entrada é tratada como pergunta.
+> Compare introducao_rag.pdf e arquitetura_de_software.pdf: o que cada um diz sobre trocar o provedor de IA?
+[1] Arquitetura em Camadas e Qualidade de Software: [2] Arquitetura de Software: O que cada um diz sobre trocar o provedor de IA é que uma boa arquitetura divide o sistema em partes com responsabilidades claras, reduzindo o efeito colateral de uma alteração. No entanto, nenhuma das duas arquiteturas mencionadas menciona explicitamente trocar um provedor de IA.
+Fontes:
+introducao_rag.pdf, p. 1
+arquitetura_de_software.pdf, p. 1
+> sair
+[código de saída: 0]

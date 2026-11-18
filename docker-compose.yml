@@ -1,0 +1,41 @@
+# Modo local gratuito: Ollama + chatbot, sem envio de dados a terceiros.
+# Uso:
+#   docker compose up -d ollama
+#   docker compose exec ollama ollama pull nomic-embed-text
+#   docker compose exec ollama ollama pull llama3.2
+#   docker compose run --rm chatbot carregar inputs
+#   docker compose run --rm chatbot
+services:
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-modelos:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  chatbot:
+    build: .
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      PROVEDOR_EMBEDDINGS: ${PROVEDOR_EMBEDDINGS:-local}
+      PROVEDOR_GERACAO: ${PROVEDOR_GERACAO:-local}
+      OLLAMA_HOST: http://ollama:11434
+      MODELO_EMBEDDINGS_LOCAL: ${MODELO_EMBEDDINGS_LOCAL:-nomic-embed-text}
+      MODELO_GERACAO_LOCAL: ${MODELO_GERACAO_LOCAL:-llama3.2}
+      TOP_K: ${TOP_K:-4}
+      DIRETORIO_INDICE: /app/data/index
+    volumes:
+      - indice:/app/data
+    stdin_open: true
+    tty: true
+
+volumes:
+  ollama-modelos:
+  indice:

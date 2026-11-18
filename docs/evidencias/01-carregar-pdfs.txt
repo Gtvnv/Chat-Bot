@@ -1,0 +1,15 @@
+$ python -m pdf_rag_chatbot
+PDF RAG Chatbot. Comandos: carregar <caminhos>, documentos, topk <n>, sair. Qualquer outra entrada é tratada como pergunta.
+> carregar inputs inputs/sentencas.txt
+'arquitetura_de_software.pdf' indexado com 4 trecho(s).
+'introducao_rag.pdf' indexado com 3 trecho(s).
+'testes_de_software.pdf' indexado com 4 trecho(s).
+'sentencas.txt' indexado com 20 trecho(s).
+Resumo da ingestão: 4 arquivo(s) indexado(s), 0 falha(s) ou ignorado(s), 31 trecho(s) gerado(s).
+> documentos
+arquitetura_de_software.pdf
+introducao_rag.pdf
+sentencas.txt
+testes_de_software.pdf
+> sair
+[código de saída: 0]

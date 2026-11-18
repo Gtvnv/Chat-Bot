@@ -1,0 +1,6 @@
+$ python -m pdf_rag_chatbot
+PDF RAG Chatbot. Comandos: carregar <caminhos>, documentos, topk <n>, sair. Qualquer outra entrada é tratada como pergunta.
+> Compare introducao_rag.pdf e arquitetura_de_software.pdf: o que cada um diz sobre trocar o provedor de IA?
+Tempo limite excedido ao gerar a resposta no Ollama.
+> sair
+[código de saída: 0]

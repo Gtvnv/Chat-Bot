@@ -1,0 +1,12 @@
+.git
+.env
+.venv
+venv
+data
+.hypothesis
+.pytest_cache
+**/__pycache__
+*.egg-info
+.kiro
+docs
+tests

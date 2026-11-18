@@ -1,0 +1,11 @@
+$ python -m pdf_rag_chatbot
+PDF RAG Chatbot. Comandos: carregar <caminhos>, documentos, topk <n>, sair. Qualquer outra entrada é tratada como pergunta.
+> O que o documento de testes diz sobre testes baseados em propriedades?
+[1] O documento de testes menciona que 3 testes baseados em propriedades são utilizados, e que esses testes declaram uma regra que deve valer para qualquer entrada válida, e que a biblioteca gera centenas de casos aleatórios para tentar violá-la.
+
+[2] O documento de testes afirma que testes instáveis que falham de forma intermitente corroem a confiança da equipe na suíte e devem ser corrigidos com prioridade.
+Fontes:
+testes_de_software.pdf, p. 3
+sentencas.txt, linha 5
+> sair
+[código de saída: 0]

@@ -1,0 +1,20 @@
+Testes automatizados dão segurança para refatorar o código sem medo de quebrar funcionalidades existentes.
+A pirâmide de testes recomenda muitos testes unitários, alguns de integração e poucos testes de ponta a ponta.
+Testes baseados em propriedades verificam regras gerais do sistema com centenas de entradas geradas automaticamente.
+Cobertura de código alta não garante qualidade, pois um teste sem asserções executa linhas sem validar nenhum comportamento.
+Testes instáveis, que falham de forma intermitente, corroem a confiança da equipe na suíte e devem ser corrigidos com prioridade.
+A Arquitetura Limpa mantém as regras de negócio no centro e faz as dependências apontarem sempre para dentro.
+Separar interface, regra de negócio e acesso a dados facilita a manutenção e a troca de tecnologias ao longo do tempo.
+O acoplamento baixo e a coesão alta tornam os módulos mais fáceis de entender, testar e evoluir de forma independente.
+A inversão de dependência permite substituir um banco de dados ou um provedor de IA sem alterar a lógica central.
+Decisões arquiteturais devem ser registradas em documentos curtos, para que a equipe entenda o motivo de cada escolha no futuro.
+Revisão de código compartilha conhecimento entre a equipe e detecta defeitos antes que cheguem à produção.
+A dívida técnica cresce quando atalhos são tomados sem planejamento, e seus juros aparecem na forma de lentidão nas entregas.
+Integração contínua executa os testes a cada alteração e revela problemas de integração logo no início do desenvolvimento.
+Nomes claros de variáveis e funções reduzem a necessidade de comentários e melhoram a legibilidade do código.
+Funções pequenas com uma única responsabilidade são mais simples de testar e de reaproveitar em outros contextos.
+Métricas como tempo de resposta, taxa de erros e frequência de implantação ajudam a medir a qualidade do processo de entrega.
+Documentar limitações conhecidas de um sistema é uma forma honesta de orientar o uso correto e de planejar evoluções futuras.
+Em sistemas com IA generativa, respostas devem ser conferidas nas fontes originais, pois o modelo pode produzir informações incorretas.
+Citar a fonte de cada resposta aumenta a rastreabilidade e permite verificar rapidamente se a informação está correta.
+Requisitos claros e testáveis reduzem retrabalho, porque todos entendem o que significa considerar uma funcionalidade pronta.

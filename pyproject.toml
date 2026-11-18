@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pdf-rag-chatbot"
+version = "0.1.0"
+description = "Chatbot de perguntas e respostas sobre PDFs usando RAG, com citações de arquivo e página."
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "pypdf>=4.0",
+    "numpy>=1.26",
+    "httpx>=0.27",
+    "python-dotenv>=1.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "tests"]
+testpaths = ["tests"]
